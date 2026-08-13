@@ -1,0 +1,225 @@
+<head>
+  <title>Ledger — durable Meteor primitives</title>
+</head>
+
+<body>
+  {{> app}}
+</body>
+
+<template name="app">
+  <header>
+    <h1>Ledger</h1>
+    <p class="tagline">expenses · one agent · five primitives · 3-of-5 humans hold the keys</p>
+    {{> loginBar}}
+  </header>
+
+  <main>
+    <section class="col">
+      {{> submitForm}}
+      {{> expenseList}}
+    </section>
+    <section class="col">
+      {{> agentPanel}}
+      {{> brainPanel}}
+      {{> approvalInbox}}
+      {{> budgetBar}}
+      {{> pipeline}}
+      {{> paymentsList}}
+    </section>
+  </main>
+</template>
+
+<template name="loginBar">
+  <div class="login-bar">
+    {{#if currentUser}}
+      <span>acting as <b>{{currentUser.username}}</b> <em>({{role}})</em></span>
+      <button class="js-logout">sign out</button>
+    {{else}}
+      <span>act as:</span>
+      {{#each user in users}}
+        <button class="js-login-as" data-username="{{user.username}}">{{user.username}}</button>
+      {{/each}}
+    {{/if}}
+  </div>
+</template>
+
+<template name="submitForm">
+  <div class="card">
+    <h2>Submit expense</h2>
+    <form class="js-submit-expense">
+      <input name="memo" placeholder="memo (e.g. conference tickets)" required>
+      <input name="amount" type="number" step="0.01" min="0.01" placeholder="amount (USD)" required>
+      <input name="payee" placeholder="payee" required>
+      <select name="dept">
+        <option value="engineering">engineering</option>
+        <option value="marketing">marketing</option>
+      </select>
+      <button type="submit" {{submitDisabled}}>Submit</button>
+    </form>
+    {{#unless currentUser}}<p class="hint">sign in to submit</p>{{/unless}}
+  </div>
+</template>
+
+<template name="expenseList">
+  <div class="card">
+    <h2>Expenses</h2>
+    <table>
+      <thead><tr><th>memo</th><th>amount</th><th>status</th><th>verdict</th></tr></thead>
+      <tbody>
+        {{#each e in expenses}}
+          <tr>
+            <td>{{e.memo}}</td>
+            <td>${{e.amount.value}}</td>
+            <td><span class="status status-{{statusSlug e}}">{{statusLabel e}}</span></td>
+            <td>{{verdictOf e}}</td>
+          </tr>
+        {{else}}
+          <tr><td colspan="4" class="empty">nothing yet — submit one</td></tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+</template>
+
+<template name="agentPanel">
+  <div class="card">
+    <h2>Clerk agent <span class="sub">durable:agent · steer · interrupt · fork</span></h2>
+    {{#if anyRuns}}
+      <div class="run-chips">
+        {{#each r in runs}}
+          <button class="chip js-agent-chip {{#if isCurrent r}}chip-current{{/if}}" data-key="{{r.key}}">
+            {{chipLabel r}}
+          </button>
+        {{/each}}
+      </div>
+    {{/if}}
+    {{#if runKey}}
+      <div class="agent-status">
+        <span class="status status-{{agentStatus}}">{{agentStatus}}</span>
+        <span class="sub">{{usageLabel}}</span>
+        <button class="js-agent-fork" title="branch this run before the payment decision">⑂ fork: reject timeline</button>
+      </div>
+      <div class="chat">
+        {{#each m in messages}}
+          {{#if roleIs m 'user'}}
+            <div class="msg msg-user {{#if m.steering}}msg-steer{{/if}}"><b>{{userLabel m}}</b> {{m.content}}</div>
+          {{/if}}
+          {{#if roleIs m 'assistant'}}
+            <div class="msg msg-assistant"><b>clerk</b> {{m.content}}
+              {{#each c in m.toolCalls}}<span class="toolcall">→ {{c.name}}</span>{{/each}}
+            </div>
+          {{/if}}
+          {{#if roleIs m 'tool'}}
+            <div class="msg msg-tool"><b>{{m.tool}}</b><span class="gate gate-{{m.gate}}">{{m.gate}}</span> {{toolResult m}}</div>
+          {{/if}}
+          {{#if roleIs m 'note'}}
+            <div class="msg msg-note">{{noteLabel m}}</div>
+          {{/if}}
+        {{/each}}
+      </div>
+      {{#with pending}}
+        <div class="op">
+          <div><b>{{tool}}</b> wants to run — your call</div>
+          <span>
+            <button class="js-agent-approve">approve</button>
+            <button class="js-agent-deny">deny</button>
+          </span>
+        </div>
+      {{/with}}
+      <form class="js-agent-say">
+        <input name="text" placeholder="steer the clerk mid-task…" autocomplete="off">
+        <button type="submit">say</button>
+        <button type="button" class="js-agent-interrupt">interrupt</button>
+        <button type="button" class="js-agent-compact" title="summarize older context (journaled)">compact</button>
+      </form>
+    {{else}}
+      <form class="js-agent-start">
+        <input name="memo" placeholder="memo" value="team offsite dinner">
+        <input name="amount" type="number" step="0.01" min="0.01" value="180">
+        <input name="payee" placeholder="payee" value="Bistro Nova">
+        <button type="submit" {{startDisabled}}>Ask the clerk to handle it</button>
+      </form>
+      {{#unless currentUser}}<p class="hint">sign in to start the clerk</p>{{/unless}}
+    {{/if}}
+  </div>
+</template>
+
+<template name="brainPanel">
+  <div class="card">
+    <h2>Clerk's brain <span class="sub">durable:memory · scope 'clerk' · also served at /mcp/brain</span></h2>
+    {{#with checkpoint}}
+      <div class="fact fact-checkpoint"><b>⏱ last</b> {{text}}</div>
+    {{/with}}
+    {{#each f in facts}}
+      <div class="fact">
+        <span>{{f.text}}</span>
+        <span class="fact-side">
+          {{#each t in f.tags}}<span class="tag">{{t}}</span>{{/each}}
+          <button class="js-forget" data-id="{{f._id}}" title="forget">✕</button>
+        </span>
+      </div>
+    {{else}}
+      <p class="empty">nothing remembered yet — tell the clerk “remember: …”</p>
+    {{/each}}
+  </div>
+</template>
+
+<template name="approvalInbox">
+  <div class="card">
+    <h2>Approval inbox <span class="sub">treasury · {{thresholdLabel}} · frost-ed25519</span></h2>
+    {{#each op in pendingOps}}
+      <div class="op">
+        <div>
+          <b>{{op.method}}</b> — {{opMemo op}}
+          <div class="sub">{{op.approvals.length}}/{{op.required}} commitments · {{shareCount op}}/{{op.required}} sig shares
+            {{#each a in op.approvals}}<span class="sig {{sigClass op a}}">{{signerName a}}</span>{{/each}}
+          </div>
+          {{#if awaitingShares op}}
+            <div class="sub await-note">round 2 — sign in as: {{awaitingShares op}}</div>
+          {{/if}}
+        </div>
+        <button class="js-approve" data-op="{{op._id}}" {{approveDisabled op}}>
+          {{#if approvedByMe op}}signed ✓{{else}}approve{{/if}}
+        </button>
+      </div>
+    {{else}}
+      <p class="empty">no operations awaiting signatures</p>
+    {{/each}}
+  </div>
+</template>
+
+<template name="budgetBar">
+  <div class="card">
+    <h2>Engineering budget <span class="sub">live entity state</span></h2>
+    {{#with budget}}
+      <div class="bar"><div class="bar-fill" style="width: {{pct}}%"></div></div>
+      <p class="sub">${{spent}} reserved of ${{limit}}</p>
+    {{/with}}
+  </div>
+</template>
+
+<template name="pipeline">
+  <div class="card">
+    <h2>Fulfillment pipeline <span class="sub">workflow runs</span></h2>
+    {{#each run in runs}}
+      <div class="run">
+        <span class="status status-{{run.status}}">{{run.status}}</span>
+        <span>{{runMemo run}}</span>
+        <span class="sub">{{runDetail run}}</span>
+      </div>
+    {{else}}
+      <p class="empty">no runs yet</p>
+    {{/each}}
+  </div>
+</template>
+
+<template name="paymentsList">
+  <div class="card">
+    <h2>Payments <span class="sub">bank stub</span></h2>
+    {{#each p in payments}}
+      <div class="run">💸 ${{p.amount}} → {{p.payee}}</div>
+    {{else}}
+      <p class="empty">no transfers yet</p>
+    {{/each}}
+  </div>
+</template>

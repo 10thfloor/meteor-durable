@@ -1,0 +1,107 @@
+:root {
+  --bg: #0f1117; --card: #181b24; --ink: #e8eaf0; --sub: #8b91a5;
+  --accent: #7c8cf8; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+header { padding: 20px 24px 8px; }
+h1 { margin: 0; font-size: 26px; }
+.tagline { margin: 2px 0 12px; color: var(--sub); font-size: 13px; }
+main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 0 24px 40px; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+.col { display: flex; flex-direction: column; gap: 16px; }
+.card { background: var(--card); border-radius: 10px; padding: 16px 18px; }
+h2 { margin: 0 0 10px; font-size: 16px; }
+.sub { color: var(--sub); font-size: 12px; font-weight: normal; }
+.empty { color: var(--sub); font-style: italic; }
+.hint { color: var(--sub); font-size: 12px; }
+
+.login-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+button {
+  background: var(--accent); border: none; color: #fff; border-radius: 6px;
+  padding: 6px 12px; cursor: pointer; font-size: 13px;
+}
+button:disabled { opacity: 0.4; cursor: default; }
+.js-logout, .js-login-as { background: #2a2f3e; }
+
+form { display: flex; flex-direction: column; gap: 8px; }
+input, select {
+  background: #10131b; color: var(--ink); border: 1px solid #2a2f3e;
+  border-radius: 6px; padding: 8px 10px; font-size: 14px;
+}
+
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; color: var(--sub); font-size: 12px; font-weight: 500; padding: 4px 8px 4px 0; }
+td { padding: 6px 8px 6px 0; border-top: 1px solid #232735; }
+
+.status {
+  display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px;
+  background: #2a2f3e;
+}
+.status-submitted { background: #3b3f1e; color: var(--warn); }
+.status-paid, .status-done { background: #173524; color: var(--ok); }
+.status-rejected, .status-failed { background: #3a1d1d; color: var(--bad); }
+.status-running, .status-waiting_signal, .status-sleeping { background: #1e2a4a; color: var(--accent); }
+.status-awaiting-signatures { background: #3d2a4a; color: #d8b4fe; }
+
+.op, .run {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 8px 0; border-top: 1px solid #232735;
+}
+.op:first-of-type, .run:first-of-type { border-top: none; }
+.sig {
+  border-radius: 8px; padding: 0 6px; margin-left: 4px; font-size: 11px;
+}
+.sig-done { background: #173524; color: var(--ok); }
+.sig-owed { background: #3b3f1e; color: var(--warn); }
+.await-note { color: #d8b4fe; margin-top: 4px; }
+.bar { height: 10px; background: #10131b; border-radius: 5px; overflow: hidden; }
+.bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--warn)); }
+
+/* ── Clerk agent panel ── */
+.run-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.chip { font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid #2a2f3e;
+  background: #2a2f3e; color: var(--ink); cursor: pointer; }
+.chip-current { border-color: var(--accent); background: #1e2a4a; color: var(--accent); }
+.agent-status { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.agent-status .js-agent-fork { margin-left: auto; font-size: 12px; background: #2a2f3e; }
+.chat { display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow-y: auto;
+  padding: 10px; background: #10131b; border: 1px solid #232735; border-radius: 8px; margin-bottom: 10px; }
+.msg { font-size: 13px; line-height: 1.45; padding: 6px 10px; border-radius: 8px; max-width: 95%;
+  color: var(--ink); }
+.msg b { margin-right: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; opacity: .55; }
+.msg-user { background: #1e2a4a; align-self: flex-end; }
+.msg-steer { background: #33290f; border: 1px dashed var(--warn); }
+.msg-assistant { background: #1d212c; border: 1px solid #2a2f3e; align-self: flex-start; }
+.msg-tool { background: #12201a; border: 1px solid #1d3527; color: #9fd8b4;
+  font-family: ui-monospace, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.msg-note { align-self: center; font-size: 12px; color: var(--sub); background: transparent; }
+.toolcall { display: inline-block; margin-left: 8px; font-size: 11px; font-family: ui-monospace, monospace;
+  background: #232746; border: 1px solid #343a63; border-radius: 4px; padding: 1px 6px; color: #b9c2ff; }
+.gate { font-size: 10px; border-radius: 4px; padding: 1px 5px; margin-right: 6px; text-transform: uppercase; }
+.gate-act { background: #173524; color: var(--ok); }
+.gate-ask { background: #3b3f1e; color: var(--warn); }
+.gate-cosign { background: #3a1d1d; color: var(--bad); }
+.status-thinking { background: #1e2a4a; color: var(--accent); }
+.status-working { background: #173524; color: var(--ok); }
+.status-awaiting-approval { background: #3b3f1e; color: var(--warn); }
+.status-compacting { background: #3d2a4a; color: #d8b4fe; }
+.status-stopped, .status-idle { background: #2a2f3e; color: var(--sub); }
+.js-agent-say { flex-direction: row; }
+.js-agent-say input { flex: 1; }
+.js-agent-say button { flex: none; }
+
+/* ── brain panel ── */
+.fact { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  padding: 7px 0; border-top: 1px solid #232735; font-size: 13px; }
+.fact:first-of-type { border-top: none; }
+.fact-side { display: flex; gap: 6px; align-items: center; flex: none; }
+.fact-checkpoint { color: var(--sub); font-size: 12px; }
+.fact-checkpoint b { font-weight: 500; margin-right: 4px; }
+.tag { font-size: 10px; text-transform: uppercase; border-radius: 4px; padding: 1px 5px;
+  background: #232746; color: #b9c2ff; }
+.js-forget { background: transparent; color: var(--sub); padding: 0 4px; font-size: 12px; }
