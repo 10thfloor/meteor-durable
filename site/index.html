@@ -297,7 +297,7 @@
         <a class="cta" href="#journal">How it works</a>
       </div>
       <div class="cred-row">
-        <span class="cred">real demo log →</span>
+        <span class="cred">seven packages</span>
         <span class="cred">FROST · RFC 9591</span>
         <span class="cred">MCP native</span>
         <span class="cred">Meteor 3.0+</span>
@@ -305,20 +305,20 @@
     </div>
     <div class="term">
       <div class="term-head"><span class="dot live"></span><span class="dot"></span><span class="dot"></span>
-        the demo we actually run<button class="replay-btn" id="replay">▶ replay</button></div>
+        when the server dies mid-run<button class="replay-btn" id="replay">▶ replay</button></div>
       <div class="term-body"><ol id="termlines">
-        <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># your app, port 3300</span></li>
-        <li><span class="t-dim">></span> Clerk(exp_6qS9).say(exp_6qS9)</li>
-        <li><span class="t-dim">think#1.0</span>&nbsp; Looking up expense exp_6qS9.</li>
-        <li><span class="t-dim">act:lookup</span> { memo: 'team offsite dinner', amount: 180 }</li>
-        <li><span class="t-dim">think#1.1</span>&nbsp; Legit — notify payee, request payment.</li>
-        <li><span class="t-dim">cosign:pay</span> parked — 2 of 3 signatures collected…</li>
-        <li class="t-kill">⚡ kill -9 42117 <span class="t-note">— the deploy. the crash. the bad day.</span></li>
+        <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># any app, any long-running task</span></li>
+        <li><span class="t-dim">></span> Assistant(task_82fk).say('handle it')</li>
+        <li><span class="t-dim">think#1.0</span>&nbsp;&nbsp; Breaking the task down.</li>
+        <li><span class="t-dim">act:fetch</span>&nbsp;&nbsp; { records: 1204 }</li>
+        <li><span class="t-dim">think#1.1</span>&nbsp;&nbsp; Ready — this part needs a human.</li>
+        <li><span class="t-dim">approval</span>&nbsp;&nbsp; parked — could be minutes. could be days.</li>
+        <li class="t-kill">⚡ kill -9 51833 <span class="t-note">— the deploy. the crash. the bad day.</span></li>
         <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># just start it again</span></li>
-        <li class="t-ok">✓ resuming agent:clerk:exp_6qS9 (was: running @ cosign:pay#1.1.1)</li>
-        <li><span class="t-dim">cosign:pay</span> 3 of 3 — signed. transfer complete.</li>
-        <li><span class="t-dim">think#1.2</span>&nbsp; Done — expense exp_6qS9 has been paid.</li>
-        <li class="t-ok">✓ payee emailed exactly once — replays never re-fire side effects</li>
+        <li class="t-ok">✓ resuming agent:assistant:task_82fk (was: parked @ receive(approval))</li>
+        <li><span class="t-dim">approval</span>&nbsp;&nbsp; ✓ approved — whenever they got to it</li>
+        <li><span class="t-dim">think#1.2</span>&nbsp;&nbsp; Done.</li>
+        <li class="t-ok">✓ every side effect ran exactly once — replays never re-fire</li>
       </ol></div>
     </div>
   </div>
@@ -336,9 +336,9 @@
     <div class="journal-scroll"><div class="journal">
       <span class="jentry">recv(say)<small>user</small></span><span class="jarrow">→</span>
       <span class="jentry">think#1.0<small>model</small></span><span class="jarrow">→</span>
-      <span class="jentry">act:lookup<small>tool</small></span><span class="jarrow">→</span>
+      <span class="jentry">act:fetch<small>tool</small></span><span class="jarrow">→</span>
       <span class="jentry hot">recv(approval)<small>human ok</small></span><span class="jarrow">→</span>
-      <span class="jentry hot">cosign:pay<small>3-of-5 sign</small></span><span class="jarrow">→</span>
+      <span class="jentry hot">cosign:sign<small>t-of-n</small></span><span class="jarrow">→</span>
       <span class="jentry">drain(say×1)<small>steering</small></span><span class="jarrow">→</span>
       <span class="jentry">think#1.2<small>yield</small></span>
     </div></div>
@@ -363,17 +363,17 @@
         <h3>And this is everything you wrote</h3>
         <p>No queue, no state store, no orchestrator sidecar, no websocket layer. Declare the agent the way
           Meteor taught you to declare a collection, then address it by key from anywhere:
-          <code>Clerk(expenseId).say(…)</code>.</p>
+          <code>Assistant(taskId).say(…)</code>.</p>
         <p>The model is pluggable — a registry name, <code>anthropic:…</code>, or your own
           <code>{ complete }</code>. Budgets are enforced, per-turn usage is journaled, and a deterministic
           <code>mockModel</code> makes the whole thing testable without an API key.</p>
       </div>
-      <div class="code-panel"><div class="code-head"><span class="dot live"></span> server/clerk.js — complete</div>
-        <div class="code-body"><pre><span class="k">export const</span> Clerk = Meteor.<span class="f">agent</span>({
-  name: <span class="s">'clerk'</span>,
+      <div class="code-panel"><div class="code-head"><span class="dot live"></span> server/assistant.js — complete</div>
+        <div class="code-body"><pre><span class="k">export const</span> Assistant = Meteor.<span class="f">agent</span>({
+  name: <span class="s">'assistant'</span>,
   model: <span class="s">'anthropic:claude-sonnet-5'</span>,
-  instructions: <span class="s">'Look up the expense. If it holds up, pay it.'</span>,
-  tools: [lookup, pay],   <span class="c">// pay parks for a 3-of-5 co-sign ↓</span>
+  instructions: <span class="s">'Do the task. Get sign-off before anything irreversible.'</span>,
+  tools: [search, release],   <span class="c">// release parks for a 3-of-5 co-sign ↓</span>
   memory: Brain,
   budget: { steps: <span class="s">8</span>, spend: <span class="s">'$0.50'</span> },
 });</pre></div></div>
@@ -424,10 +424,10 @@
         <p class="journal-tag">→ drain(say×1) · drain(interrupt×1)</p>
       </div>
       <div class="code-panel"><div class="code-head"><span class="dot live"></span> from any client</div>
-        <div class="code-body"><pre>Clerk(id).<span class="f">say</span>(<span class="s">'cap it at $200'</span>);   <span class="c">// steering</span>
-Clerk(id).<span class="f">interrupt</span>();            <span class="c">// ESC, durably</span>
-Clerk(id).<span class="f">messages</span>();             <span class="c">// live transcript</span>
-Clerk(id).<span class="f">status</span>();  <span class="c">// thinking · awaiting-approval · idle</span></pre></div></div>
+        <div class="code-body"><pre>Assistant(id).<span class="f">say</span>(<span class="s">'check the failing tests first'</span>);
+Assistant(id).<span class="f">interrupt</span>();     <span class="c">// ESC, durably</span>
+Assistant(id).<span class="f">messages</span>();      <span class="c">// live transcript</span>
+Assistant(id).<span class="f">status</span>();  <span class="c">// thinking · awaiting-approval · idle</span></pre></div></div>
     </div>
 
     <div class="show flip">
@@ -440,9 +440,9 @@ Clerk(id).<span class="f">status</span>();  <span class="c">// thinking · await
         <p class="journal-tag">→ forkedFrom: { key, at }</p>
       </div>
       <div class="code-panel"><div class="code-head"><span class="dot live"></span> what-if, for real</div>
-        <div class="code-body"><pre><span class="k">const</span> branch = <span class="k">await</span> Clerk(id).<span class="f">fork</span>({
-  before: <span class="s">'think#1.1'</span>,          <span class="c">// the payment decision</span>
-  say: <span class="s">'Reject this — duplicate receipt.'</span>,
+        <div class="code-body"><pre><span class="k">const</span> branch = <span class="k">await</span> Assistant(id).<span class="f">fork</span>({
+  before: <span class="s">'think#1.1'</span>,          <span class="c">// the big decision</span>
+  say: <span class="s">'Take the conservative path instead.'</span>,
 });
 <span class="c">// same history · different future · zero re-fired effects</span></pre></div></div>
     </div>
@@ -460,7 +460,7 @@ Clerk(id).<span class="f">status</span>();  <span class="c">// thinking · await
       <div class="code-panel"><div class="code-head"><span class="dot live"></span> one brain, three doors</div>
         <div class="code-body"><pre><span class="k">export const</span> Brain = Meteor.<span class="f">memory</span>({ name: <span class="s">'brain'</span> });
 
-Meteor.<span class="f">agent</span>({ name: <span class="s">'clerk'</span>, memory: Brain });      <span class="c">// agents</span>
+Meteor.<span class="f">agent</span>({ name: <span class="s">'assistant'</span>, memory: Brain }); <span class="c">// agents</span>
 MCP.<span class="f">server</span>(<span class="s">'brain'</span>, { tools: Brain.<span class="f">mcpTools</span>() });   <span class="c">// MCP clients</span>
 Brain(<span class="s">'user/prefs'</span>).<span class="f">watch</span>();                        <span class="c">// humans, live</span></pre></div></div>
     </div>
@@ -473,7 +473,7 @@ Brain(<span class="s">'user/prefs'</span>).<span class="f">watch</span>();      
     <h2>Seven packages. Take what you need.</h2>
     <p class="lead">Each stands alone; they compose because everything is a <strong>keyed handle</strong> —
       <code style="font-size:14px">Fulfill(orderId)</code>, <code style="font-size:14px">Budget('eng')</code>,
-      <code style="font-size:14px">Clerk(expenseId)</code>. If you can address a Collection, you already know
+      <code style="font-size:14px">Assistant(taskId)</code>. If you can address a Collection, you already know
       the API.</p>
     <div class="pkgs">
       <div class="pkg"><div class="pkg-name"><b>durable:workflow</b><span class="ver">0.1.0</span></div>
@@ -504,10 +504,6 @@ Brain(<span class="s">'user/prefs'</span>).<span class="f">watch</span>();      
         <p>Bidirectional views: rename, redact, scope. Least-privilege context for models as a schema concern,
           not a prompt plea.</p>
         <div class="add"><span class="dollar">$</span> meteor add durable:lens</div></div>
-      <div class="pkg"><div class="pkg-name"><b>ledger</b><span class="ver">demo app</span></div>
-        <p>All seven composed: the expense app from the terminal above — agent chat panel, approval inbox, brain
-          panel, FROST ceremony.</p>
-        <div class="add"><span class="dollar">$</span> git clone …/ledger &amp;&amp; meteor</div></div>
     </div>
   </div>
 </section>
@@ -527,7 +523,7 @@ Brain(<span class="s">'user/prefs'</span>).<span class="f">watch</span>();      
         <h3>Durable by default</h3>
         <p>Everyone is hand-rolling agent state, approval flows, and memory sidecars. Same answer, one level up:
           put state on the journal, make every run a subscription — and a production agent becomes an afternoon.
-          <code>Clerk(id).say()</code>.</p></div>
+          <code>Assistant(id).say()</code>.</p></div>
     </div>
   </div>
 </section>
