@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>durable:* — Durable primitives for Meteor</title>
+</head>
+<body>
+<style>
+  /* ── tokens: dark-first (meteor.com's ground), full light theme ── */
+  :root {
+    --bg: #171933;
+    --bg-raise: #1f2240;
+    --bg-deep: #12142a;
+    --ink: #f2f3f8;
+    --muted: #9ba0bc;
+    --line: #2c3054;
+    --coral: #de4f4f;
+    --coral-ink: #ff9b8a;
+    --hot: #ff8066;
+    --good: #4ade80;
+    --bad: #ff6b6b;
+    --code-bg: #12142a;
+    --code-line: #262a4e;
+    --code-ink: #dfe2f2;
+    --code-muted: #767ca6;
+    --code-str: #9ce29c;
+    --code-kw: #8fa8ff;
+    --code-fn: #ffb38a;
+    --pill-bg: #232750;
+    --shadow: 0 18px 50px -18px rgba(0, 0, 0, .55);
+    /* theme-invariant: used ONLY inside panels that stay dark in both themes */
+    --t-good: #4ade80;
+    --t-bad: #ff6b6b;
+    --t-accent: #ff9b8a;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #fcfcfd;
+      --bg-raise: #ffffff;
+      --bg-deep: #f2f3f8;
+      --ink: #1e2137;
+      --muted: #5d6284;
+      --line: #e4e6f0;
+      --coral: #d8433d;
+      --coral-ink: #c23a34;
+      --hot: #f4633f;
+      --good: #1a7f37;
+      --bad: #c62828;
+      --pill-bg: #eef0f8;
+      --shadow: 0 18px 50px -22px rgba(30, 33, 55, .25);
+      /* code + terminal panels stay dark in the light theme — the docs-site move */
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #fcfcfd;
+    --bg-raise: #ffffff;
+    --bg-deep: #f2f3f8;
+    --ink: #1e2137;
+    --muted: #5d6284;
+    --line: #e4e6f0;
+    --coral: #d8433d;
+    --coral-ink: #c23a34;
+    --hot: #f4633f;
+    --good: #1a7f37;
+    --bad: #c62828;
+    --pill-bg: #eef0f8;
+    --shadow: 0 18px 50px -22px rgba(30, 33, 55, .25);
+  }
+  :root[data-theme="dark"] {
+    --bg: #171933;
+    --bg-raise: #1f2240;
+    --bg-deep: #12142a;
+    --ink: #f2f3f8;
+    --muted: #9ba0bc;
+    --line: #2c3054;
+    --coral: #de4f4f;
+    --coral-ink: #ff9b8a;
+    --hot: #ff8066;
+    --good: #4ade80;
+    --bad: #ff6b6b;
+    --pill-bg: #232750;
+    --shadow: 0 18px 50px -18px rgba(0, 0, 0, .55);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--coral-ink); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--coral); outline-offset: 2px; border-radius: 4px; }
+  code, pre, .mono { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace; }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* ── nav ── */
+  nav {
+    position: sticky; top: 0; z-index: 10;
+    background: color-mix(in srgb, var(--bg) 86%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-in { display: flex; align-items: center; gap: 22px; padding: 14px 24px; max-width: 1080px; margin: 0 auto; }
+  .wordmark { font-family: ui-monospace, Menlo, monospace; font-weight: 700; font-size: 17px; color: var(--ink); letter-spacing: -.02em; }
+  .wordmark .star { color: var(--coral); }
+  .nav-links { display: flex; gap: 18px; margin-left: auto; font-size: 14px; flex-wrap: wrap; }
+  .nav-links a { color: var(--muted); }
+  .nav-links a:hover { color: var(--ink); text-decoration: none; }
+
+  /* ── hero ── */
+  header.hero { position: relative; overflow: hidden; border-bottom: 1px solid var(--line); }
+  .hero-bg {
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(1.5px 1.5px at 12% 30%, var(--muted) 50%, transparent 51%),
+      radial-gradient(1px 1px at 34% 14%, var(--muted) 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 58% 42%, var(--muted) 50%, transparent 51%),
+      radial-gradient(1px 1px at 76% 18%, var(--muted) 50%, transparent 51%),
+      radial-gradient(1px 1px at 90% 55%, var(--muted) 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 44% 78%, var(--muted) 50%, transparent 51%);
+    opacity: .35;
+  }
+  .hero-in { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; padding: 76px 24px 68px; max-width: 1080px; margin: 0 auto; }
+  @media (max-width: 900px) { .hero-in { grid-template-columns: 1fr; padding-top: 52px; } }
+
+  .eyebrow { font-family: ui-monospace, Menlo, monospace; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--coral-ink); margin: 0 0 18px; }
+  h1 { font-size: clamp(38px, 5.4vw, 56px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; margin: 0 0 20px; text-wrap: balance; }
+  h1 .accent { color: var(--coral-ink); }
+  h1 .mono-h { font-family: ui-monospace, Menlo, monospace; font-weight: 700; letter-spacing: -.05em; }
+  .sub { font-size: 18.5px; color: var(--muted); max-width: 32em; margin: 0 0 28px; text-wrap: pretty; }
+  .sub b { color: var(--ink); }
+
+  .install-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .install {
+    display: inline-flex; align-items: center; gap: 12px;
+    background: var(--pill-bg); border: 1px solid var(--line); border-radius: 10px;
+    padding: 11px 16px; font-family: ui-monospace, Menlo, monospace; font-size: 15px;
+  }
+  .install .dollar { color: var(--coral-ink); user-select: none; }
+  .copy-btn { border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 6px; border-radius: 6px; font-family: inherit; }
+  .copy-btn:hover { color: var(--ink); background: var(--line); }
+  .cta { display: inline-block; background: var(--coral); color: #fff; font-weight: 600; padding: 12px 22px; border-radius: 10px; font-size: 15px; }
+  .cta:hover { background: var(--hot); text-decoration: none; }
+
+  /* ── terminal (the aha artifact) ── */
+  .term {
+    background: var(--code-bg); border: 1px solid var(--code-line); border-radius: 14px;
+    box-shadow: var(--shadow); overflow: hidden;
+  }
+  .term-head {
+    display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+    border-bottom: 1px solid var(--code-line);
+    font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; color: var(--code-muted);
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--code-line); flex: none; }
+  .dot.live { background: var(--coral); }
+  .replay-btn { margin-left: auto; border: 1px solid var(--code-line); background: transparent; color: var(--code-muted); font-family: inherit; font-size: 12px; padding: 3px 10px; border-radius: 6px; cursor: pointer; }
+  .replay-btn:hover { color: var(--code-ink); border-color: var(--code-muted); }
+  .term-body { padding: 16px 20px 18px; overflow-x: auto; }
+  .term-body ol { list-style: none; margin: 0; padding: 0; font-family: ui-monospace, Menlo, monospace; font-size: 13px; line-height: 1.75; color: var(--code-ink); min-width: 430px; }
+  .term-body li { opacity: 0; transform: translateY(3px); transition: opacity .25s ease, transform .25s ease; white-space: nowrap; }
+  .term-body li.on { opacity: 1; transform: none; }
+  .t-dim { color: var(--code-muted); }
+  .t-cmd .t-dollar { color: var(--t-accent); }
+  .t-kill { color: var(--t-bad); font-weight: 700; }
+  .t-ok { color: var(--t-good); }
+  .t-note { color: var(--code-muted); font-style: italic; }
+  @media (prefers-reduced-motion: reduce) {
+    .term-body li { opacity: 1; transform: none; transition: none; }
+    .replay-btn { display: none; }
+  }
+  .cred-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .cred { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px; }
+
+  /* ── sections ── */
+  section { padding: 74px 0; border-bottom: 1px solid var(--line); }
+  .kicker { font-family: ui-monospace, Menlo, monospace; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--coral-ink); margin: 0 0 12px; }
+  h2 { font-size: clamp(28px, 3.6vw, 38px); letter-spacing: -.025em; line-height: 1.12; margin: 0 0 14px; font-weight: 800; text-wrap: balance; }
+  .lead { color: var(--muted); font-size: 17.5px; max-width: 42em; margin: 0 0 36px; text-wrap: pretty; }
+  .lead strong, .lead b { color: var(--ink); font-weight: 600; }
+
+  /* journal strip */
+  .journal-scroll { overflow-x: auto; padding-bottom: 6px; margin-bottom: 26px; }
+  .journal { display: flex; gap: 6px; align-items: center; min-width: max-content; }
+  .jentry {
+    font-family: ui-monospace, Menlo, monospace; font-size: 12.5px;
+    background: var(--bg-raise); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 11px; white-space: nowrap; color: var(--ink);
+  }
+  .jentry small { display: block; font-size: 10px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .jentry.hot { border-color: var(--coral); }
+  .jentry.hot small { color: var(--coral-ink); }
+  .jarrow { color: var(--muted); flex: none; font-size: 12px; }
+  .jobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 40px; }
+  .job { background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .job h3 { margin: 0 0 6px; font-size: 15.5px; }
+  .job h3 .mono { color: var(--coral-ink); font-size: 13px; }
+  .job p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  /* code panels */
+  .code-panel { background: var(--code-bg); border: 1px solid var(--code-line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+  .code-head { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--code-line); font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; color: var(--code-muted); }
+  .code-body { overflow-x: auto; }
+  pre { margin: 0; padding: 18px 20px; font-size: 13.5px; line-height: 1.62; color: var(--code-ink); min-width: 0; }
+  .c { color: var(--code-muted); font-style: italic; }
+  .k { color: var(--code-kw); }
+  .s { color: var(--code-str); }
+  .f { color: var(--code-fn); }
+
+  .show { display: grid; grid-template-columns: .85fr 1.15fr; gap: 40px; align-items: start; margin-top: 42px; }
+  .show:first-of-type { margin-top: 0; }
+  .show.flip .show-copy { order: 2; }
+  @media (max-width: 900px) { .show { grid-template-columns: 1fr !important; } .show.flip .show-copy { order: 0; } }
+  .show h3 { font-size: 22px; letter-spacing: -.015em; margin: 0 0 10px; }
+  .show p { color: var(--muted); font-size: 15.5px; margin: 0 0 12px; }
+  .show p code { font-size: 13px; color: var(--ink); background: var(--pill-bg); border-radius: 4px; padding: 1px 5px; }
+  .journal-tag { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; color: var(--coral-ink); }
+
+  /* gate ladder */
+  .ladder { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  .rung { background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  .rung .gate { display: inline-block; font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; border-radius: 5px; padding: 2px 8px; margin-bottom: 10px; }
+  .g-auto { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+  .g-ask { background: color-mix(in srgb, var(--hot) 18%, transparent); color: var(--hot); }
+  .g-cosign { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+  .rung h3 { margin: 0 0 6px; font-size: 17px; }
+  .rung p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .rung p code { font-size: 12.5px; color: var(--ink); background: var(--pill-bg); border-radius: 4px; padding: 1px 5px; }
+
+  /* package grid */
+  .pkgs { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .pkg { display: flex; flex-direction: column; gap: 10px; background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  .pkg:hover { border-color: var(--coral); }
+  .pkg-name { display: flex; align-items: baseline; gap: 10px; font-family: ui-monospace, Menlo, monospace; }
+  .pkg-name b { font-size: 16px; color: var(--ink); font-weight: 700; }
+  .ver { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .pkg p { margin: 0; color: var(--muted); font-size: 14.5px; flex: 1; }
+  .pkg p code { font-size: 12.5px; color: var(--ink); background: var(--pill-bg); border-radius: 4px; padding: 1px 5px; }
+  .pkg .add { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--code-ink); background: var(--code-bg); border: 1px solid var(--code-line); border-radius: 8px; padding: 8px 12px; overflow-x: auto; white-space: nowrap; }
+  .pkg .add .dollar { color: var(--t-accent); }
+
+  /* lineage */
+  .lineage { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; max-width: 860px; }
+  @media (max-width: 700px) { .lineage { grid-template-columns: 1fr; } }
+  .era { background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  .era .year { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--coral-ink); letter-spacing: .06em; }
+  .era h3 { margin: 8px 0 8px; font-size: 17px; }
+  .era p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .era p code { font-size: 12.5px; color: var(--ink); background: var(--pill-bg); border-radius: 4px; padding: 1px 5px; }
+
+  /* steps */
+  .steps { display: grid; gap: 12px; counter-reset: step; max-width: 700px; }
+  .step { display: grid; grid-template-columns: 40px 1fr; gap: 16px; align-items: start; background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  .step::before { counter-increment: step; content: counter(step, decimal-leading-zero); font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--coral-ink); padding-top: 3px; }
+  .step h3 { margin: 0 0 6px; font-size: 16px; }
+  .step p { margin: 0 0 10px; color: var(--muted); font-size: 14.5px; }
+  .step p code { font-size: 12.5px; color: var(--ink); background: var(--pill-bg); border-radius: 4px; padding: 1px 5px; }
+  .step .add { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--code-ink); background: var(--code-bg); border: 1px solid var(--code-line); border-radius: 8px; padding: 9px 12px; overflow-x: auto; white-space: nowrap; }
+  .step .add .dollar { color: var(--t-accent); }
+
+  footer { padding: 46px 0 60px; color: var(--muted); font-size: 14px; }
+  .foot-family { font-family: ui-monospace, Menlo, monospace; font-size: 13px; margin: 0 0 14px; color: var(--muted); }
+  .foot-family b { color: var(--ink); }
+  footer p { margin: 0 0 8px; max-width: 52em; }
+</style>
+
+<nav>
+  <div class="nav-in">
+    <span class="wordmark">durable<span class="star">:*</span></span>
+    <div class="nav-links">
+      <a href="#journal">The journal</a>
+      <a href="#keys">Human keys</a>
+      <a href="#harness">The harness</a>
+      <a href="#packages">Packages</a>
+      <a href="#start">Get started</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="hero-bg"></div>
+  <div class="hero-in">
+    <div>
+      <p class="eyebrow">Durable primitives for Meteor 3</p>
+      <h1><span class="mono-h">kill&nbsp;-9</span> the server.<br>The agent <span class="accent">finishes anyway.</span></h1>
+      <p class="sub">You shipped an agent. Then you redeployed, and it forgot everything mid-task.
+        <b>durable:*</b> keeps every step of an agent — every model call, tool call, approval, and pause —
+        in a journal in your database, not in RAM. Crashes replay. Deploys resume. Humans keep the keys.</p>
+      <div class="install-row">
+        <span class="install"><span class="dollar">$</span><span>meteor add durable:agent</span>
+          <button class="copy-btn" data-copy="meteor add durable:agent">copy</button></span>
+        <a class="cta" href="#journal">How it works</a>
+      </div>
+      <div class="cred-row">
+        <span class="cred">real demo log →</span>
+        <span class="cred">FROST · RFC 9591</span>
+        <span class="cred">MCP native</span>
+        <span class="cred">Meteor 3.0+</span>
+      </div>
+    </div>
+    <div class="term">
+      <div class="term-head"><span class="dot live"></span><span class="dot"></span><span class="dot"></span>
+        the demo we actually run<button class="replay-btn" id="replay">▶ replay</button></div>
+      <div class="term-body"><ol id="termlines">
+        <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># your app, port 3300</span></li>
+        <li><span class="t-dim">></span> Clerk(exp_6qS9).say(exp_6qS9)</li>
+        <li><span class="t-dim">think#1.0</span>&nbsp; Looking up expense exp_6qS9.</li>
+        <li><span class="t-dim">act:lookup</span> { memo: 'team offsite dinner', amount: 180 }</li>
+        <li><span class="t-dim">think#1.1</span>&nbsp; Legit — notify payee, request payment.</li>
+        <li><span class="t-dim">cosign:pay</span> parked — 2 of 3 signatures collected…</li>
+        <li class="t-kill">⚡ kill -9 42117 <span class="t-note">— the deploy. the crash. the bad day.</span></li>
+        <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># just start it again</span></li>
+        <li class="t-ok">✓ resuming agent:clerk:exp_6qS9 (was: running @ cosign:pay#1.1.1)</li>
+        <li><span class="t-dim">cosign:pay</span> 3 of 3 — signed. transfer complete.</li>
+        <li><span class="t-dim">think#1.2</span>&nbsp; Done — expense exp_6qS9 has been paid.</li>
+        <li class="t-ok">✓ payee emailed exactly once — replays never re-fire side effects</li>
+      </ol></div>
+    </div>
+  </div>
+</header>
+
+<section id="journal">
+  <div class="wrap">
+    <p class="kicker">The aha</p>
+    <h2>There is no state to lose.<br>The run <em>is</em> its history.</h2>
+    <p class="lead">Every durable operation appends one entry to a journal — a plain document in the Mongo you
+      already have. That one document does <strong>four jobs</strong> other stacks buy separately: it's the crash
+      recovery, the chat UI, the branch point, and the audit trail. This is the entire trick. Everything else on
+      this page is a consequence.</p>
+
+    <div class="journal-scroll"><div class="journal">
+      <span class="jentry">recv(say)<small>user</small></span><span class="jarrow">→</span>
+      <span class="jentry">think#1.0<small>model</small></span><span class="jarrow">→</span>
+      <span class="jentry">act:lookup<small>tool</small></span><span class="jarrow">→</span>
+      <span class="jentry hot">recv(approval)<small>human ok</small></span><span class="jarrow">→</span>
+      <span class="jentry hot">cosign:pay<small>3-of-5 sign</small></span><span class="jarrow">→</span>
+      <span class="jentry">drain(say×1)<small>steering</small></span><span class="jarrow">→</span>
+      <span class="jentry">think#1.2<small>yield</small></span>
+    </div></div>
+
+    <div class="jobs">
+      <div class="job"><h3><span class="mono">1</span> · Crash recovery</h3>
+        <p>Resume = replay. Recorded steps return their results without re-running, then execution goes live at
+          the frontier. A hash of every prompt is checked on replay — drift fails loudly.</p></div>
+      <div class="job"><h3><span class="mono">2</span> · The chat UI</h3>
+        <p>The transcript isn't synced <em>from</em> the agent — it <em>is</em> the journal, published over DDP.
+          Any framework, zero streaming code.</p></div>
+      <div class="job"><h3><span class="mono">3</span> · The branch point</h3>
+        <p>Fork a run at any entry and seed a different instruction: same history, different future. What-if
+          timelines and judgment tests, for free.</p></div>
+      <div class="job"><h3><span class="mono">4</span> · The audit trail</h3>
+        <p>Who approved, who signed, what the model saw, what each tool returned — already recorded, because
+          recording it is how the system works at all.</p></div>
+    </div>
+
+    <div class="show flip">
+      <div class="show-copy">
+        <h3>And this is everything you wrote</h3>
+        <p>No queue, no state store, no orchestrator sidecar, no websocket layer. Declare the agent the way
+          Meteor taught you to declare a collection, then address it by key from anywhere:
+          <code>Clerk(expenseId).say(…)</code>.</p>
+        <p>The model is pluggable — a registry name, <code>anthropic:…</code>, or your own
+          <code>{ complete }</code>. Budgets are enforced, per-turn usage is journaled, and a deterministic
+          <code>mockModel</code> makes the whole thing testable without an API key.</p>
+      </div>
+      <div class="code-panel"><div class="code-head"><span class="dot live"></span> server/clerk.js — complete</div>
+        <div class="code-body"><pre><span class="k">export const</span> Clerk = Meteor.<span class="f">agent</span>({
+  name: <span class="s">'clerk'</span>,
+  model: <span class="s">'anthropic:claude-sonnet-5'</span>,
+  instructions: <span class="s">'Look up the expense. If it holds up, pay it.'</span>,
+  tools: [lookup, pay],   <span class="c">// pay parks for a 3-of-5 co-sign ↓</span>
+  memory: Brain,
+  budget: { steps: <span class="s">8</span>, spend: <span class="s">'$0.50'</span> },
+});</pre></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="keys">
+  <div class="wrap">
+    <p class="kicker">The 2026 question</p>
+    <h2>Can your agent spend money alone? <span style="color: var(--coral-ink)">No. Cryptographically no.</span></h2>
+    <p class="lead">Every tool carries a gate in its type, and the run <strong>durably parks</strong> at each one —
+      for minutes or for days, across restarts. The top rung isn't a y/n prompt: it's t-of-n threshold signing
+      (FROST-ed25519), under a group key the custodians co-generate in their browsers. <strong>The private key
+      never exists on the server</strong> — there is nothing for a prompt injection, a rogue tool, or a stolen
+      database to steal.</p>
+    <div class="ladder">
+      <div class="rung"><span class="gate g-auto">auto</span>
+        <h3>Just runs</h3>
+        <p>Plain <code>Meteor.method</code> callables. Look things up, compute, draft. The result lands in the
+          journal like everything else.</p></div>
+      <div class="rung"><span class="gate g-ask">ask</span>
+        <h3>One human says ok</h3>
+        <p>The run parks until someone calls <code>approve()</code> or <code>deny(reason)</code> — a reactive
+          inbox, not a terminal prompt. Timeouts auto-deny, and even the timeout is journaled.</p></div>
+      <div class="rung"><span class="gate g-cosign">cosign</span>
+        <h3>A quorum signs</h3>
+        <p>A keyring method: 3-of-5 humans each contribute a signature share; the aggregate verifies as plain
+          ed25519. The agent proposes. Humans dispose.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="harness">
+  <div class="wrap">
+    <p class="kicker">Consequences of the journal</p>
+    <h2>Everything a serious harness has.<br>Each one is a journal entry.</h2>
+    <p class="lead">Steering, interrupts, compaction, forking, memory — the features you know from the best CLI
+      harnesses, except here they're not a process on someone's laptop. They're rows in your database, so they
+      survive, sync, and audit like everything else in your app.</p>
+
+    <div class="show">
+      <div class="show-copy">
+        <h3>Steer it while it works</h3>
+        <p>Messages sent mid-task queue in a mailbox and inject at the next safe point — between steps, exactly
+          like a harness pumping its input queue. Interrupt yields the turn; nothing queued is ever lost, even
+          across a restart.</p>
+        <p class="journal-tag">→ drain(say×1) · drain(interrupt×1)</p>
+      </div>
+      <div class="code-panel"><div class="code-head"><span class="dot live"></span> from any client</div>
+        <div class="code-body"><pre>Clerk(id).<span class="f">say</span>(<span class="s">'cap it at $200'</span>);   <span class="c">// steering</span>
+Clerk(id).<span class="f">interrupt</span>();            <span class="c">// ESC, durably</span>
+Clerk(id).<span class="f">messages</span>();             <span class="c">// live transcript</span>
+Clerk(id).<span class="f">status</span>();  <span class="c">// thinking · awaiting-approval · idle</span></pre></div></div>
+    </div>
+
+    <div class="show flip">
+      <div class="show-copy">
+        <h3>Fork the timeline</h3>
+        <p>Branch a run — even a finished one — before any decision, seed one steering message, and get the
+          timeline where the payment never happened. The shared prefix replays from the journal, so
+          <strong>no side effect ever fires twice</strong>. It's also a test harness: attack every decision point
+          and assert the gated tool never fires.</p>
+        <p class="journal-tag">→ forkedFrom: { key, at }</p>
+      </div>
+      <div class="code-panel"><div class="code-head"><span class="dot live"></span> what-if, for real</div>
+        <div class="code-body"><pre><span class="k">const</span> branch = <span class="k">await</span> Clerk(id).<span class="f">fork</span>({
+  before: <span class="s">'think#1.1'</span>,          <span class="c">// the payment decision</span>
+  say: <span class="s">'Reject this — duplicate receipt.'</span>,
+});
+<span class="c">// same history · different future · zero re-fired effects</span></pre></div></div>
+    </div>
+
+    <div class="show">
+      <div class="show-copy">
+        <h3>Memory with three doors</h3>
+        <p>Working memory is the journal. Long-term memory is a keyed, full-text store — and compaction distills
+          into it <em>inside</em> the journaled step, so memory formation is exactly-once. Agents, MCP clients
+          (Claude Desktop, Cursor…), and a live user-facing panel all share the same brain. External clients even
+          get <code>memory_get_last</code> answered from the agent's actual journal — no honor-system
+          checkpoints.</p>
+        <p class="journal-tag">→ compact#0 · remember · recall</p>
+      </div>
+      <div class="code-panel"><div class="code-head"><span class="dot live"></span> one brain, three doors</div>
+        <div class="code-body"><pre><span class="k">export const</span> Brain = Meteor.<span class="f">memory</span>({ name: <span class="s">'brain'</span> });
+
+Meteor.<span class="f">agent</span>({ name: <span class="s">'clerk'</span>, memory: Brain });      <span class="c">// agents</span>
+MCP.<span class="f">server</span>(<span class="s">'brain'</span>, { tools: Brain.<span class="f">mcpTools</span>() });   <span class="c">// MCP clients</span>
+Brain(<span class="s">'user/prefs'</span>).<span class="f">watch</span>();                        <span class="c">// humans, live</span></pre></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="packages">
+  <div class="wrap">
+    <p class="kicker">On Atmosphere</p>
+    <h2>Seven packages. Take what you need.</h2>
+    <p class="lead">Each stands alone; they compose because everything is a <strong>keyed handle</strong> —
+      <code style="font-size:14px">Fulfill(orderId)</code>, <code style="font-size:14px">Budget('eng')</code>,
+      <code style="font-size:14px">Clerk(expenseId)</code>. If you can address a Collection, you already know
+      the API.</p>
+    <div class="pkgs">
+      <div class="pkg"><div class="pkg-name"><b>durable:workflow</b><span class="ver">0.1.0</span></div>
+        <p>The foundation: journaled, crash-resumable runs. <code>step</code> / <code>receive</code> /
+          <code>sleep</code> / <code>drain</code> / <code>fork</code>, saga compensation, exactly-once triggers.</p>
+        <div class="add"><span class="dollar">$</span> meteor add durable:workflow</div></div>
+      <div class="pkg"><div class="pkg-name"><b>durable:agent</b><span class="ver">0.2.0</span></div>
+        <p>The harness on top: steering, interrupts, compaction, forking, budgets, gates, model registry,
+          drift guard.</p>
+        <div class="add"><span class="dollar">$</span> meteor add durable:agent</div></div>
+      <div class="pkg"><div class="pkg-name"><b>durable:keyring</b><span class="ver">0.1.0</span></div>
+        <p>The top gate: FROST-ed25519 threshold signing with Pedersen DKG. Keys live with humans, never the
+          server.</p>
+        <div class="add"><span class="dollar">$</span> meteor add durable:keyring</div></div>
+      <div class="pkg"><div class="pkg-name"><b>durable:memory</b><span class="ver">0.1.0</span></div>
+        <p>Long-term memory: keyed scopes, full-text recall, session checkpoints, and the standard mcp-memory
+          surface.</p>
+        <div class="add"><span class="dollar">$</span> meteor add durable:memory</div></div>
+      <div class="pkg"><div class="pkg-name"><b>durable:mcp</b><span class="ver">0.1.0</span></div>
+        <p>Speak MCP both directions: mount methods as tools at <code>/mcp/name</code>; outside agents inherit
+          your gates.</p>
+        <div class="add"><span class="dollar">$</span> meteor add durable:mcp</div></div>
+      <div class="pkg"><div class="pkg-name"><b>durable:entity</b><span class="ver">0.1.0</span></div>
+        <p>Keyed serialized actors with reactive state — one method queue per key, concurrency by
+          construction.</p>
+        <div class="add"><span class="dollar">$</span> meteor add durable:entity</div></div>
+      <div class="pkg"><div class="pkg-name"><b>durable:lens</b><span class="ver">0.1.0</span></div>
+        <p>Bidirectional views: rename, redact, scope. Least-privilege context for models as a schema concern,
+          not a prompt plea.</p>
+        <div class="add"><span class="dollar">$</span> meteor add durable:lens</div></div>
+      <div class="pkg"><div class="pkg-name"><b>ledger</b><span class="ver">demo app</span></div>
+        <p>All seven composed: the expense app from the terminal above — agent chat panel, approval inbox, brain
+          panel, FROST ceremony.</p>
+        <div class="add"><span class="dollar">$</span> git clone …/ledger &amp;&amp; meteor</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="lineage">
+  <div class="wrap">
+    <p class="kicker">Why Meteor</p>
+    <h2>The same move, one level up</h2>
+    <p class="lead">This worked once before.</p>
+    <div class="lineage">
+      <div class="era"><span class="year">2012</span>
+        <h3>Real-time by default</h3>
+        <p>Everyone was hand-rolling sockets, cache invalidation, and sync. Meteor's answer: put data on the
+          wire, make every query a subscription — and a chat app became an afternoon.
+          <code>Messages.find()</code>.</p></div>
+      <div class="era"><span class="year">2026</span>
+        <h3>Durable by default</h3>
+        <p>Everyone is hand-rolling agent state, approval flows, and memory sidecars. Same answer, one level up:
+          put state on the journal, make every run a subscription — and a production agent becomes an afternoon.
+          <code>Clerk(id).say()</code>.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <p class="kicker">Get started</p>
+    <h2>Your first durable thing, in three commands</h2>
+    <div class="steps">
+      <div class="step"><div>
+        <h3>Create an app (or use yours)</h3>
+        <div class="add"><span class="dollar">$</span> meteor create my-app &amp;&amp; cd my-app</div>
+      </div></div>
+      <div class="step"><div>
+        <h3>Add the primitives you need</h3>
+        <p>Start with <code>workflow</code> — everything else builds on it.</p>
+        <div class="add"><span class="dollar">$</span> meteor add durable:workflow durable:agent durable:memory</div>
+      </div></div>
+      <div class="step"><div>
+        <h3>Declare something, then kill it</h3>
+        <p>Write a workflow, start a run, <code>kill -9</code> the server, restart. Watching your own process
+          finish a job it was dead in the middle of — that's the moment this page is about.</p>
+        <div class="add">Meteor.workflow({ name: 'hello', async run() { … } })</div>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p class="foot-family"><b>durable:*</b> — workflow · entity · keyring · lens · mcp · agent · memory</p>
+    <p>A community exploration in the Meteor spirit — built on Meteor 3, MIT licensed, proof-of-concept. Not an
+      official Meteor Software product; "Meteor" and Atmosphere belong to Meteor Software. Yes, the section
+      structure is an homage to the original Seven Principles. Some things deserve homage.</p>
+  </div>
+</footer>
+
+<script>
+  // copy buttons
+  document.querySelectorAll('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.copy);
+        const old = btn.textContent; btn.textContent = 'copied';
+        setTimeout(() => { btn.textContent = old; }, 1200);
+      } catch (e) { /* clipboard unavailable — text stays selectable */ }
+    });
+  });
+
+  // terminal replay — the aha artifact
+  (function () {
+    const lines = Array.from(document.querySelectorAll('#termlines li'));
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let timers = [];
+    function play() {
+      timers.forEach(clearTimeout); timers = [];
+      if (reduced) { lines.forEach((l) => l.classList.add('on')); return; }
+      lines.forEach((l) => l.classList.remove('on'));
+      let t = 350;
+      lines.forEach((l) => {
+        timers.push(setTimeout(() => l.classList.add('on'), t));
+        // dramatic pauses: before the kill, and before the resume
+        t += l.classList.contains('t-kill') ? 950 : (l.classList.contains('t-ok') ? 800 : 420);
+      });
+    }
+    const btn = document.getElementById('replay');
+    if (btn) btn.addEventListener('click', play);
+    play();
+  })();
+</script>
+</body>
+
+</html>
