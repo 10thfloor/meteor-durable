@@ -373,7 +373,7 @@
   name: <span class="s">'assistant'</span>,
   model: <span class="s">'anthropic:claude-sonnet-5'</span>,
   instructions: <span class="s">'Do the task. Get sign-off before anything irreversible.'</span>,
-  tools: [search, release],   <span class="c">// release parks for a 3-of-5 co-sign ↓</span>
+  tools: [search, release],   <span class="c">// release parks for a threshold co-sign ↓</span>
   memory: Brain,
   budget: { steps: <span class="s">8</span>, spend: <span class="s">'$0.50'</span> },
 });</pre></div></div>
@@ -384,7 +384,7 @@
 <section id="keys">
   <div class="wrap">
     <p class="kicker">The 2026 question</p>
-    <h2>Can your agent spend money alone? <span style="color: var(--coral-ink)">No. Cryptographically no.</span></h2>
+    <h2>Can your agent do the irreversible alone? <span style="color: var(--coral-ink)">No. Cryptographically no.</span></h2>
     <p class="lead">Every tool carries a gate in its type, and the run <strong>durably parks</strong> at each one —
       for minutes or for days, across restarts. The top rung isn't a y/n prompt: it's t-of-n threshold signing
       (FROST-ed25519), under a group key the custodians co-generate in their browsers. <strong>The private key
@@ -401,8 +401,8 @@
           inbox, not a terminal prompt. Timeouts auto-deny, and even the timeout is journaled.</p></div>
       <div class="rung"><span class="gate g-cosign">cosign</span>
         <h3>A quorum signs</h3>
-        <p>A keyring method: 3-of-5 humans each contribute a signature share; the aggregate verifies as plain
-          ed25519. The agent proposes. Humans dispose.</p></div>
+        <p>A keyring method: a threshold you choose — 2-of-3, 5-of-9 — each signer contributes a share and the
+          aggregate verifies as plain ed25519. The agent proposes. Humans dispose.</p></div>
     </div>
   </div>
 </section>
