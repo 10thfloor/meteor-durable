@@ -409,19 +409,28 @@
         <p>Declare it like a collection; address it by key from anywhere: <code>Assistant(taskId).say(…)</code>.
           Model calls and tool calls are journal entries, so everything on this page about workflows is already
           true of agents.</p>
+        <p>Tools carry a <code>gate</code>: <code>'ask'</code> parks the run until one human calls
+          <code>approve()</code> or <code>deny()</code>; <code>'cosign'</code> (a keyring method) parks it for a
+          t-of-n threshold signature. The verdict — who, when, why — becomes part of the transcript.</p>
         <p>The model is pluggable — a registry name, <code>anthropic:…</code>, or your own
           <code>{ complete }</code>. Budgets are enforced, per-turn token usage is journaled, and a deterministic
           <code>mockModel</code> makes agents testable without an API key.</p>
       </div>
-      <div class="code-panel"><div class="code-head"><span class="dot live"></span> server/assistant.js — complete</div>
+      <div class="code-panel"><div class="code-head"><span class="dot live"></span> server/assistant.js</div>
         <div class="code-body"><pre><span class="k">export const</span> Assistant = Meteor.<span class="f">agent</span>({
   name: <span class="s">'assistant'</span>,
   model: <span class="s">'anthropic:claude-sonnet-5'</span>,
   instructions: <span class="s">'Do the task. Get sign-off before anything irreversible.'</span>,
-  tools,
+  tools: [
+    search,
+    { ...apply, gate: <span class="s">'ask'</span> },   <span class="c">// ← this tool parks the run for a human</span>
+  ],
   memory: Brain,
   budget: { steps: <span class="s">8</span>, spend: <span class="s">'$0.50'</span> },
-});</pre></div></div>
+});
+
+<span class="c">// the run waits — minutes or days, across deploys — until someone rules:</span>
+Assistant(taskId).<span class="f">approve</span>();      <span class="c">// or .deny('reason')</span></pre></div></div>
     </div>
 
     <div class="show flip">
