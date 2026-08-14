@@ -209,13 +209,14 @@
   .jentry.hot { border-color: var(--coral); }
   .jentry.hot small { color: var(--coral-ink); }
   .jarrow { color: var(--muted); flex: none; font-size: 12px; }
-  .jobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; margin-bottom: 40px; }
-  .job { background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .jobs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-bottom: 40px; max-width: 920px; }
+  @media (max-width: 700px) { .jobs { grid-template-columns: 1fr; } }
+  .job { background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px; padding: 24px 26px; }
   .job-code { display: block; font-size: 12.5px; color: var(--code-ink); background: var(--code-bg);
-    border: 1px solid var(--code-line); border-radius: 7px; padding: 8px 11px; margin-bottom: 10px;
+    border: 1px solid var(--code-line); border-radius: 7px; padding: 10px 13px; margin-bottom: 14px;
     overflow-x: auto; white-space: nowrap; }
   .job-code .err { color: var(--t-bad); }
-  .job p { margin: 0; color: var(--muted); font-size: 14px; }
+  .job p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
 
   /* code panels */
   .code-panel { background: var(--code-bg); border: 1px solid var(--code-line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
@@ -322,15 +323,15 @@
         when the server dies mid-run<button class="replay-btn" id="replay">▶ replay</button></div>
       <div class="term-body"><ol id="termlines">
         <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># your app</span></li>
-        <li><span class="t-dim">></span> Import.start('f_31ab')</li>
-        <li><span class="t-dim">step:parse</span>&nbsp;&nbsp;&nbsp; { rows: 1204 } <span class="t-dim">— journaled</span></li>
-        <li><span class="t-dim">receive</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; parked on 'confirmed' — could be minutes. could be days.</li>
+        <li><span class="t-dim">></span> Onboard.start('u_31ab')</li>
+        <li><span class="t-dim">step:welcome</span>&nbsp;&nbsp;&nbsp; sent</li>
+        <li><span class="t-dim">sleep('2 days')</span> the function is now asleep, mid-await</li>
         <li class="t-kill">⚡ kill -9 51833 <span class="t-note"># deploy, OOM, whatever</span></li>
-        <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># just start it again</span></li>
-        <li class="t-ok">✓ resuming import:f_31ab (was: waiting_signal @ receive(confirmed))</li>
-        <li><span class="t-dim">></span> Import('f_31ab').send('confirmed')</li>
-        <li><span class="t-dim">step:insert</span>&nbsp;&nbsp; 1204 rows written</li>
-        <li class="t-ok">✓ done — every step ran exactly once. parse never re-ran.</li>
+        <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># two deploys later…</span></li>
+        <li class="t-ok">✓ resuming onboard:u_31ab (was: sleeping @ sleep(2 days))</li>
+        <li><span class="t-dim">sleep('2 days')</span> woke on the original clock — not restarted</li>
+        <li><span class="t-dim">step:checkin</span>&nbsp;&nbsp;&nbsp; user already active → skip the nudge</li>
+        <li class="t-ok">✓ done — every step ran exactly once. welcome never re-sent.</li>
       </ol></div>
     </div>
   </div>
@@ -367,27 +368,28 @@
       re-fire</strong> — and the function reaches live code exactly where it stopped.</p>
 
     <div class="code-panel" style="max-width: 720px; margin-bottom: 40px;">
-      <div class="code-head"><span class="dot live"></span> server/import.js — the run from the terminal above</div>
-      <div class="code-body"><pre><span class="k">export const</span> Import = Meteor.<span class="f">workflow</span>({
-  name: <span class="s">'import'</span>,
-  signals: { confirmed: {} },
-  <span class="k">async</span> <span class="f">run</span>(fileId) {
-    <span class="k">const</span> rows = <span class="k">await</span> <span class="k">this</span>.<span class="f">step</span>(() =&gt; <span class="f">parse</span>(fileId), { label: <span class="s">'parse'</span> });
-    <span class="k">await</span> <span class="k">this</span>.<span class="f">receive</span>(<span class="s">'confirmed'</span>, { timeout: <span class="s">'2 days'</span> });
-    <span class="k">await</span> <span class="k">this</span>.<span class="f">step</span>(() =&gt; <span class="f">insertAll</span>(rows), { label: <span class="s">'insert'</span> });
+      <div class="code-head"><span class="dot live"></span> server/onboard.js — the run from the terminal above</div>
+      <div class="code-body"><pre><span class="k">export const</span> Onboard = Meteor.<span class="f">workflow</span>({
+  name: <span class="s">'onboard'</span>,
+  <span class="k">async</span> <span class="f">run</span>(userId) {
+    <span class="k">await</span> <span class="k">this</span>.<span class="f">step</span>(() =&gt; Email.<span class="f">welcome</span>(userId), { label: <span class="s">'welcome'</span> });
+    <span class="k">await</span> <span class="k">this</span>.<span class="f">sleep</span>(<span class="s">'2 days'</span>);   <span class="c">// a plain await — that survives deploys</span>
+    <span class="k">await</span> <span class="k">this</span>.<span class="f">step</span>(<span class="k">async</span> () =&gt; (<span class="k">await</span> <span class="f">isActive</span>(userId))
+      ? <span class="s">'skip'</span>
+      : Email.<span class="f">nudge</span>(userId), { label: <span class="s">'checkin'</span> });
   },
 });</pre></div>
     </div>
 
     <div class="jobs">
-      <div class="job"><code class="job-code">Import(<span class="s">'f_31ab'</span>).watch()</code>
+      <div class="job"><code class="job-code">Onboard(<span class="s">'u_31ab'</span>).watch()</code>
         <p>Status, current step, history — a subscription, like any document.</p></div>
-      <div class="job"><code class="job-code"><span class="k">await</span> Import.fork(<span class="s">'f_31ab'</span>, <span class="s">'retry'</span>, { at: 1 })</code>
+      <div class="job"><code class="job-code"><span class="k">await</span> Onboard.fork(<span class="s">'u_31ab'</span>, <span class="s">'retry'</span>, { at: 1 })</code>
         <p>Branch a run: the prefix replays, then diverges live.</p></div>
       <div class="job"><code class="job-code">run.journal</code>
         <p>The audit trail — already written, because writing it is how execution works.</p></div>
-      <div class="job"><code class="job-code"><span class="err">✗ agent-drift: inputs changed at 'parse'</span></code>
-        <p>Replay is guarded: a mismatch fails loudly, never continues wrong.</p></div>
+      <div class="job"><code class="job-code"><span class="err">✗ replay mismatch at 'welcome' — failing loudly</span></code>
+        <p>Replay is guarded: drifted inputs stop the run, never continue it wrong.</p></div>
     </div>
   </div>
 </section>
@@ -416,7 +418,7 @@
   name: <span class="s">'assistant'</span>,
   model: <span class="s">'anthropic:claude-sonnet-5'</span>,
   instructions: <span class="s">'Do the task. Get sign-off before anything irreversible.'</span>,
-  tools,          <span class="c">// Meteor.method callables — or gated: 'ask' / 'cosign'</span>
+  tools,
   memory: Brain,
   budget: { steps: <span class="s">8</span>, spend: <span class="s">'$0.50'</span> },
 });</pre></div></div>
