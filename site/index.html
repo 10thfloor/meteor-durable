@@ -382,9 +382,9 @@
     </div>
 
     <div class="jobs">
-      <div class="job"><code class="job-code">Onboard(<span class="s">'u_31ab'</span>).watch()</code>
+      <div class="job"><code class="job-code">Onboard(userId).watch()</code>
         <p>Status, current step, history — a subscription, like any document.</p></div>
-      <div class="job"><code class="job-code"><span class="k">await</span> Onboard.fork(<span class="s">'u_31ab'</span>, <span class="s">'retry'</span>, { at: 1 })</code>
+      <div class="job"><code class="job-code"><span class="k">await</span> Onboard.fork(userId, <span class="s">'retry'</span>, { at: 1 })</code>
         <p>Branch a run: the prefix replays, then diverges live.</p></div>
       <div class="job"><code class="job-code">Onboard.runs({ status: <span class="s">'sleeping'</span> })</code>
         <p>Everything in flight right now — the ops dashboard is one query.</p></div>
