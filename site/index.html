@@ -363,23 +363,16 @@
 <section id="harness">
   <div class="wrap">
     <p class="kicker">Meteor.agent</p>
-    <h2>An agent your app owns —<br>not a process on someone's laptop.</h2>
-    <p class="lead">Steering, interrupts, human gates, compaction, forking, memory — everything a serious agent
-      harness has, except here each feature is a row in your database. Agents survive deploys, wait days for
-      people, and leave a transcript your whole app can subscribe to.</p>
+    <h2>Agents, the Meteor way.</h2>
+    <p class="lead">Declared like a collection, addressed by key, alive in your database. Everything below is a
+      journal entry — so everything below survives a deploy.</p>
 
     <div class="show">
       <div class="show-copy">
-        <h3>An agent is a workflow with a model in the loop</h3>
-        <p>Declare it like a collection; address it by key from anywhere: <code>Assistant(taskId).say(…)</code>.
-          Model calls and tool calls are journal entries, so everything on this page about workflows is already
-          true of agents.</p>
-        <p>Tools carry a <code>gate</code>: <code>'ask'</code> parks the run until one human calls
-          <code>approve()</code> or <code>deny()</code>; <code>'cosign'</code> (a keyring method) parks it for a
-          t-of-n threshold signature. The verdict — who, when, why — becomes part of the transcript.</p>
-        <p>The model is pluggable — a registry name, <code>anthropic:…</code>, or your own
-          <code>{ complete }</code>. Budgets are enforced, per-turn token usage is journaled, and a deterministic
-          <code>mockModel</code> makes agents testable without an API key.</p>
+        <h3>Declare it. Gate it.</h3>
+        <p>Tools carry a <code>gate</code>: <code>'ask'</code> parks the run for one human's ok,
+          <code>'cosign'</code> for a t-of-n signature — and the verdict lands in the transcript. Any model:
+          <code>anthropic:…</code>, a registry name, or your own <code>{ complete }</code>.</p>
       </div>
       <div class="code-panel"><div class="code-head"><span class="dot live"></span> server/assistant.js</div>
         <div class="code-body"><pre><span class="k">export const</span> Assistant = Meteor.<span class="f">agent</span>({
@@ -401,9 +394,8 @@ Assistant(taskId).<span class="f">approve</span>();      <span class="c">// or .
     <div class="show flip">
       <div class="show-copy">
         <h3>Steer it while it works</h3>
-        <p>Messages sent mid-task queue in a mailbox and inject at the next safe point — between steps, exactly
-          like a harness pumping its input queue. Interrupt yields the turn; nothing queued is ever lost, even
-          across a restart.</p>
+        <p>Mid-task messages inject at the next safe point; interrupts land durably; nothing queued is ever
+          lost, even across a restart.</p>
         <p class="journal-tag">→ drain(say×1) · drain(interrupt×1)</p>
       </div>
       <div class="code-panel"><div class="code-head"><span class="dot live"></span> from any client</div>
@@ -416,10 +408,8 @@ Assistant(id).<span class="f">status</span>();  <span class="c">// thinking · a
     <div class="show">
       <div class="show-copy">
         <h3>Fork the timeline</h3>
-        <p>Branch a run — even a finished one — before any decision, seed one steering message, and get the
-          timeline where the payment never happened. The shared prefix replays from the journal, so
-          <strong>no side effect ever fires twice</strong>. It's also a test harness: attack every decision point
-          and assert the gated tool never fires.</p>
+        <p>Branch any run — even a finished one — at any point in its history and seed a different instruction.
+          The prefix replays; <strong>no side effect fires twice</strong>. It's also your agent test harness.</p>
         <p class="journal-tag">→ forkedFrom: { key, at }</p>
       </div>
       <div class="code-panel"><div class="code-head"><span class="dot live"></span> what-if, for real</div>
@@ -433,11 +423,8 @@ Assistant(id).<span class="f">status</span>();  <span class="c">// thinking · a
     <div class="show flip">
       <div class="show-copy">
         <h3>Memory with three doors</h3>
-        <p>Working memory is the journal. Long-term memory is a keyed, full-text store — and compaction distills
-          into it <em>inside</em> the journaled step, so memory formation is exactly-once. Agents, MCP clients
-          (Claude Desktop, Cursor…), and a live user-facing panel all share the same brain. External clients even
-          get <code>memory_get_last</code> answered from the agent's actual journal — no honor-system
-          checkpoints.</p>
+        <p>Long-term memory is a keyed, searchable store shared by your agents, any MCP client (Claude Desktop,
+          Cursor…), and a live panel users can see. Checkpoints come from the journal — no honor system.</p>
         <p class="journal-tag">→ compact#0 · remember · recall</p>
       </div>
       <div class="code-panel"><div class="code-head"><span class="dot live"></span> one brain, three doors</div>
