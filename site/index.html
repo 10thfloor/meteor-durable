@@ -193,6 +193,10 @@
   .stack-list { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--coral-ink); margin: 0 0 10px; }
   .oldnew-col p:last-child { margin: 0; color: var(--muted); font-size: 14.5px; }
 
+  /* code + doc panes */
+  .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 40px; }
+  @media (max-width: 900px) { .panes { grid-template-columns: 1fr; } }
+
   /* journal strip */
   .journal-scroll { overflow-x: auto; padding-bottom: 6px; margin-bottom: 26px; }
   .journal { display: flex; gap: 6px; align-items: center; min-width: max-content; }
@@ -356,55 +360,53 @@
   <div class="wrap">
     <p class="kicker">How it works</p>
     <h2>There is no state to lose.<br>The run <em>is</em> its history.</h2>
-    <p class="lead">Every durable operation appends one entry to a journal — a plain document in the Mongo you
-      already have. That one document does <strong>four jobs</strong> other stacks buy separately: it's the crash
-      recovery, the chat UI, the branch point, and the audit trail. That's the whole mechanism. Everything else
-      on this page is a consequence of it.</p>
+    <p class="lead">Declare a workflow as one async function. <code>step</code> journals a side effect,
+      <code>receive</code> parks for outside input, <code>sleep</code> is a timer that survives reboots. Each
+      operation appends one entry to the run's document in the MongoDB you already have. On boot, every
+      unfinished run re-executes: recorded entries return their recorded results — <strong>side effects don't
+      re-fire</strong> — and the function reaches live code exactly where it stopped.</p>
 
-    <div class="journal-scroll"><div class="journal">
-      <span class="jentry">recv(say)<small>user</small></span><span class="jarrow">→</span>
-      <span class="jentry">think#1.0<small>model</small></span><span class="jarrow">→</span>
-      <span class="jentry">act:fetch<small>tool</small></span><span class="jarrow">→</span>
-      <span class="jentry hot">recv(approval)<small>human ok</small></span><span class="jarrow">→</span>
-      <span class="jentry hot">cosign:sign<small>t-of-n</small></span><span class="jarrow">→</span>
-      <span class="jentry">drain(say×1)<small>steering</small></span><span class="jarrow">→</span>
-      <span class="jentry">think#1.2<small>yield</small></span>
-    </div></div>
-
-    <div class="jobs">
-      <div class="job"><h3><span class="mono">1</span> · Crash recovery</h3>
-        <p>Resume = replay. Recorded steps return their results without re-running, then execution goes live at
-          the frontier. A hash of every prompt is checked on replay — drift fails loudly.</p></div>
-      <div class="job"><h3><span class="mono">2</span> · The chat UI</h3>
-        <p>The transcript isn't synced <em>from</em> the agent — it <em>is</em> the journal, published over DDP.
-          Any framework, zero streaming code.</p></div>
-      <div class="job"><h3><span class="mono">3</span> · The branch point</h3>
-        <p>Fork a run at any entry and seed a different instruction: same history, different future. What-if
-          timelines and judgment tests, for free.</p></div>
-      <div class="job"><h3><span class="mono">4</span> · The audit trail</h3>
-        <p>Who approved, who signed, what the model saw, what each tool returned — already recorded, because
-          recording it is how the system works at all.</p></div>
+    <div class="panes">
+      <div class="code-panel"><div class="code-head"><span class="dot live"></span> what you write</div>
+        <div class="code-body"><pre><span class="k">export const</span> Import = Meteor.<span class="f">workflow</span>({
+  name: <span class="s">'import'</span>,
+  signals: { confirmed: {} },
+  <span class="k">async</span> <span class="f">run</span>(fileId) {
+    <span class="k">const</span> rows = <span class="k">await</span> <span class="k">this</span>.<span class="f">step</span>(() =&gt; <span class="f">parse</span>(fileId),
+      { label: <span class="s">'parse'</span> });
+    <span class="k">await</span> <span class="k">this</span>.<span class="f">receive</span>(<span class="s">'confirmed'</span>, { timeout: <span class="s">'2 days'</span> });
+    <span class="k">await</span> <span class="k">this</span>.<span class="f">step</span>(() =&gt; <span class="f">insertAll</span>(rows), { label: <span class="s">'insert'</span> });
+  },
+});</pre></div></div>
+      <div class="code-panel"><div class="code-head"><span class="dot live"></span> what exists in your database</div>
+        <div class="code-body"><pre><span class="c">// durable_workflow_runs — abridged</span>
+{
+  _id: <span class="s">'import:f_31ab'</span>,
+  status: <span class="s">'waiting_signal'</span>,   <span class="c">// parked — for hours or days</span>
+  journal: [
+    { type: <span class="s">'step'</span>, label: <span class="s">'parse'</span>,
+      result: { rows: <span class="s">1204</span> } },
+  ],
+  waitingFor: { signal: <span class="s">'confirmed'</span> },
+}
+<span class="c">// kill the server here. on boot: 'parse' replays from the
+// journal (no re-parse), and the run parks again — same spot.</span></pre></div></div>
     </div>
 
-    <div class="show flip">
-      <div class="show-copy">
-        <h3>And this is everything you wrote</h3>
-        <p>No queue, no state store, no orchestrator sidecar, no websocket layer. Declare the agent the way
-          Meteor taught you to declare a collection, then address it by key from anywhere:
-          <code>Assistant(taskId).say(…)</code>.</p>
-        <p>The model is pluggable — a registry name, <code>anthropic:…</code>, or your own
-          <code>{ complete }</code>. Budgets are enforced, per-turn usage is journaled, and a deterministic
-          <code>mockModel</code> makes the whole thing testable without an API key.</p>
-      </div>
-      <div class="code-panel"><div class="code-head"><span class="dot live"></span> server/assistant.js — complete</div>
-        <div class="code-body"><pre><span class="k">export const</span> Assistant = Meteor.<span class="f">agent</span>({
-  name: <span class="s">'assistant'</span>,
-  model: <span class="s">'anthropic:claude-sonnet-5'</span>,
-  instructions: <span class="s">'Do the task. Get sign-off before anything irreversible.'</span>,
-  tools: [search, release],   <span class="c">// release parks for a human co-sign</span>
-  memory: Brain,
-  budget: { steps: <span class="s">8</span>, spend: <span class="s">'$0.50'</span> },
-});</pre></div></div>
+    <div class="jobs">
+      <div class="job"><h3><span class="mono">1</span> · Replay, not recovery</h3>
+        <p>There's no checkpointing layer to bolt on — the journal is written as execution happens. If a
+          replayed operation's inputs no longer match what produced its recorded result, the run fails loudly
+          instead of continuing wrong.</p></div>
+      <div class="job"><h3><span class="mono">2</span> · A progress UI for free</h3>
+        <p>The run document publishes like any other document. Status, current step, and history are
+          subscriptions — no event stream or polling layer to build.</p></div>
+      <div class="job"><h3><span class="mono">3</span> · Fork at any entry</h3>
+        <p>Copy a journal prefix into a new run: the prefix replays, then diverges live. Same history,
+          different future — useful for what-ifs, retries, and tests.</p></div>
+      <div class="job"><h3><span class="mono">4</span> · Audit built in</h3>
+        <p>Every input, output, signal, and sign-off is in the journal, because recording them is how execution
+          works at all. There is no separate audit system to keep honest.</p></div>
     </div>
   </div>
 </section>
@@ -420,6 +422,27 @@
 
     <div class="show">
       <div class="show-copy">
+        <h3>An agent is a workflow with a model in the loop</h3>
+        <p>Declare it like a collection; address it by key from anywhere: <code>Assistant(taskId).say(…)</code>.
+          Model calls and tool calls are journal entries, so everything on this page about workflows is already
+          true of agents.</p>
+        <p>The model is pluggable — a registry name, <code>anthropic:…</code>, or your own
+          <code>{ complete }</code>. Budgets are enforced, per-turn token usage is journaled, and a deterministic
+          <code>mockModel</code> makes agents testable without an API key.</p>
+      </div>
+      <div class="code-panel"><div class="code-head"><span class="dot live"></span> server/assistant.js — complete</div>
+        <div class="code-body"><pre><span class="k">export const</span> Assistant = Meteor.<span class="f">agent</span>({
+  name: <span class="s">'assistant'</span>,
+  model: <span class="s">'anthropic:claude-sonnet-5'</span>,
+  instructions: <span class="s">'Do the task. Get sign-off before anything irreversible.'</span>,
+  tools: [search, release],   <span class="c">// release parks for a human co-sign</span>
+  memory: Brain,
+  budget: { steps: <span class="s">8</span>, spend: <span class="s">'$0.50'</span> },
+});</pre></div></div>
+    </div>
+
+    <div class="show flip">
+      <div class="show-copy">
         <h3>Steer it while it works</h3>
         <p>Messages sent mid-task queue in a mailbox and inject at the next safe point — between steps, exactly
           like a harness pumping its input queue. Interrupt yields the turn; nothing queued is ever lost, even
@@ -433,7 +456,7 @@ Assistant(id).<span class="f">messages</span>();      <span class="c">// live tr
 Assistant(id).<span class="f">status</span>();  <span class="c">// thinking · awaiting-approval · idle</span></pre></div></div>
     </div>
 
-    <div class="show flip">
+    <div class="show">
       <div class="show-copy">
         <h3>Fork the timeline</h3>
         <p>Branch a run — even a finished one — before any decision, seed one steering message, and get the
@@ -450,7 +473,7 @@ Assistant(id).<span class="f">status</span>();  <span class="c">// thinking · a
 <span class="c">// same history · different future · zero re-fired effects</span></pre></div></div>
     </div>
 
-    <div class="show">
+    <div class="show flip">
       <div class="show-copy">
         <h3>Memory with three doors</h3>
         <p>Working memory is the journal. Long-term memory is a keyed, full-text store — and compaction distills
