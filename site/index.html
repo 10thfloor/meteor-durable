@@ -184,6 +184,15 @@
   .lead { color: var(--muted); font-size: 17.5px; max-width: 42em; margin: 0 0 36px; text-wrap: pretty; }
   .lead strong, .lead b { color: var(--ink); font-weight: 600; }
 
+  /* old way vs here */
+  #pain { padding: 54px 0; background: var(--bg-deep); }
+  .oldnew { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 800px) { .oldnew { grid-template-columns: 1fr; } }
+  .oldnew-col { background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; }
+  .oldnew-col h3 { margin: 0 0 10px; font-size: 16px; letter-spacing: -.01em; }
+  .stack-list { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--coral-ink); margin: 0 0 10px; }
+  .oldnew-col p:last-child { margin: 0; color: var(--muted); font-size: 14.5px; }
+
   /* journal strip */
   .journal-scroll { overflow-x: auto; padding-bottom: 6px; margin-bottom: 26px; }
   .journal { display: flex; gap: 6px; align-items: center; min-width: max-content; }
@@ -287,13 +296,13 @@
     <div>
       <p class="eyebrow">Seven Atmosphere packages for Meteor 3</p>
       <h1>AI agents &amp; workflows,<br><span class="accent">durable by default.</span></h1>
-      <p class="sub">Meteor made real-time a subscription. <b>durable:*</b> does the same trick for what apps
-        need now: agents that survive every deploy, workflows that wait days for a human, approvals backed by
-        real cryptography — declared in a few lines, in the app you already have.</p>
+      <p class="sub">Long-running agents and workflows whose every step — model calls, tool calls, approvals,
+        timers — is journaled to MongoDB. Kill the process; on boot, runs replay to where they stopped and
+        continue. A few lines to declare, in the Meteor app you already have. Bring any LLM.</p>
       <div class="install-row">
         <span class="install"><span class="dollar">$</span><span>meteor add durable:agent</span>
           <button class="copy-btn" data-copy="meteor add durable:agent">copy</button></span>
-        <a class="cta" href="#journal">How it works</a>
+        <a class="cta" href="#start">Get started</a>
       </div>
       <div class="cred-row">
         <span class="cred">seven packages</span>
@@ -312,7 +321,7 @@
         <li><span class="t-dim">act:fetch</span>&nbsp;&nbsp; { records: 1204 }</li>
         <li><span class="t-dim">think#1.1</span>&nbsp;&nbsp; Ready — this part needs a human.</li>
         <li><span class="t-dim">approval</span>&nbsp;&nbsp; parked — could be minutes. could be days.</li>
-        <li class="t-kill">⚡ kill -9 51833 <span class="t-note">— the deploy. the crash. the bad day.</span></li>
+        <li class="t-kill">⚡ kill -9 51833 <span class="t-note"># deploy, OOM, whatever</span></li>
         <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># just start it again</span></li>
         <li class="t-ok">✓ resuming agent:assistant:task_82fk (was: parked @ receive(approval))</li>
         <li><span class="t-dim">approval</span>&nbsp;&nbsp; ✓ approved — whenever they got to it</li>
@@ -323,14 +332,34 @@
   </div>
 </header>
 
+<section id="pain">
+  <div class="wrap">
+    <div class="oldnew">
+      <div class="oldnew-col">
+        <h3>Keeping one agent alive today</h3>
+        <p class="stack-list">agent framework + job queue + Redis + vector DB + websocket layer + retry cron</p>
+        <p>Six systems holding fragments of one task's state — each wrong about the others the moment you
+          deploy. The failure modes are yours to reconcile: half-finished tool calls, double-sent effects,
+          approvals lost with the process.</p>
+      </div>
+      <div class="oldnew-col">
+        <h3>Here</h3>
+        <p class="stack-list">$ meteor add durable:agent</p>
+        <p>One journal per run, in the MongoDB your app already uses. Resume, transcript UI, forks, and the
+          audit trail are all derived from it — there is no second system to disagree with the first.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="journal">
   <div class="wrap">
-    <p class="kicker">The aha</p>
+    <p class="kicker">How it works</p>
     <h2>There is no state to lose.<br>The run <em>is</em> its history.</h2>
     <p class="lead">Every durable operation appends one entry to a journal — a plain document in the Mongo you
       already have. That one document does <strong>four jobs</strong> other stacks buy separately: it's the crash
-      recovery, the chat UI, the branch point, and the audit trail. This is the entire trick. Everything else on
-      this page is a consequence.</p>
+      recovery, the chat UI, the branch point, and the audit trail. That's the whole mechanism. Everything else
+      on this page is a consequence of it.</p>
 
     <div class="journal-scroll"><div class="journal">
       <span class="jentry">recv(say)<small>user</small></span><span class="jarrow">→</span>
@@ -518,8 +547,8 @@ Brain(<span class="s">'user/prefs'</span>).<span class="f">watch</span>();      
       </div></div>
       <div class="step"><div>
         <h3>Declare something, then kill it</h3>
-        <p>Write a workflow, start a run, <code>kill -9</code> the server, restart. Watching your own process
-          finish a job it was dead in the middle of — that's the moment this page is about.</p>
+        <p>Write a workflow, start a run, <code>kill -9</code> the server, restart. The run finishes. That's
+          the property everything above is built on — verify it yourself first.</p>
         <div class="add">Meteor.workflow({ name: 'hello', async run() { … } })</div>
       </div></div>
     </div>
