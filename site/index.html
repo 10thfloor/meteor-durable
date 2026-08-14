@@ -209,10 +209,12 @@
   .jentry.hot { border-color: var(--coral); }
   .jentry.hot small { color: var(--coral-ink); }
   .jarrow { color: var(--muted); flex: none; font-size: 12px; }
-  .jobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 40px; }
+  .jobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; margin-bottom: 40px; }
   .job { background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
-  .job h3 { margin: 0 0 6px; font-size: 15.5px; }
-  .job h3 .mono { color: var(--coral-ink); font-size: 13px; }
+  .job-code { display: block; font-size: 12.5px; color: var(--code-ink); background: var(--code-bg);
+    border: 1px solid var(--code-line); border-radius: 7px; padding: 8px 11px; margin-bottom: 10px;
+    overflow-x: auto; white-space: nowrap; }
+  .job-code .err { color: var(--t-bad); }
   .job p { margin: 0; color: var(--muted); font-size: 14px; }
 
   /* code panels */
@@ -319,18 +321,16 @@
       <div class="term-head"><span class="dot live"></span><span class="dot"></span><span class="dot"></span>
         when the server dies mid-run<button class="replay-btn" id="replay">▶ replay</button></div>
       <div class="term-body"><ol id="termlines">
-        <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># any app, any long-running task</span></li>
-        <li><span class="t-dim">></span> Assistant(task_82fk).say('handle it')</li>
-        <li><span class="t-dim">think#1.0</span>&nbsp;&nbsp; Breaking the task down.</li>
-        <li><span class="t-dim">act:fetch</span>&nbsp;&nbsp; { records: 1204 }</li>
-        <li><span class="t-dim">think#1.1</span>&nbsp;&nbsp; Ready — this part needs a human.</li>
-        <li><span class="t-dim">approval</span>&nbsp;&nbsp; parked — could be minutes. could be days.</li>
+        <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># your app</span></li>
+        <li><span class="t-dim">></span> Import.start('f_31ab')</li>
+        <li><span class="t-dim">step:parse</span>&nbsp;&nbsp;&nbsp; { rows: 1204 } <span class="t-dim">— journaled</span></li>
+        <li><span class="t-dim">receive</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; parked on 'confirmed' — could be minutes. could be days.</li>
         <li class="t-kill">⚡ kill -9 51833 <span class="t-note"># deploy, OOM, whatever</span></li>
         <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># just start it again</span></li>
-        <li class="t-ok">✓ resuming agent:assistant:task_82fk (was: parked @ receive(approval))</li>
-        <li><span class="t-dim">approval</span>&nbsp;&nbsp; ✓ approved — whenever they got to it</li>
-        <li><span class="t-dim">think#1.2</span>&nbsp;&nbsp; Done.</li>
-        <li class="t-ok">✓ every side effect ran exactly once — replays never re-fire</li>
+        <li class="t-ok">✓ resuming import:f_31ab (was: waiting_signal @ receive(confirmed))</li>
+        <li><span class="t-dim">></span> Import('f_31ab').send('confirmed')</li>
+        <li><span class="t-dim">step:insert</span>&nbsp;&nbsp; 1204 rows written</li>
+        <li class="t-ok">✓ done — every step ran exactly once. parse never re-ran.</li>
       </ol></div>
     </div>
   </div>
@@ -366,47 +366,28 @@
       unfinished run re-executes: recorded entries return their recorded results — <strong>side effects don't
       re-fire</strong> — and the function reaches live code exactly where it stopped.</p>
 
-    <div class="panes">
-      <div class="code-panel"><div class="code-head"><span class="dot live"></span> what you write</div>
-        <div class="code-body"><pre><span class="k">export const</span> Import = Meteor.<span class="f">workflow</span>({
+    <div class="code-panel" style="max-width: 720px; margin-bottom: 40px;">
+      <div class="code-head"><span class="dot live"></span> server/import.js — the run from the terminal above</div>
+      <div class="code-body"><pre><span class="k">export const</span> Import = Meteor.<span class="f">workflow</span>({
   name: <span class="s">'import'</span>,
   signals: { confirmed: {} },
   <span class="k">async</span> <span class="f">run</span>(fileId) {
-    <span class="k">const</span> rows = <span class="k">await</span> <span class="k">this</span>.<span class="f">step</span>(() =&gt; <span class="f">parse</span>(fileId),
-      { label: <span class="s">'parse'</span> });
+    <span class="k">const</span> rows = <span class="k">await</span> <span class="k">this</span>.<span class="f">step</span>(() =&gt; <span class="f">parse</span>(fileId), { label: <span class="s">'parse'</span> });
     <span class="k">await</span> <span class="k">this</span>.<span class="f">receive</span>(<span class="s">'confirmed'</span>, { timeout: <span class="s">'2 days'</span> });
     <span class="k">await</span> <span class="k">this</span>.<span class="f">step</span>(() =&gt; <span class="f">insertAll</span>(rows), { label: <span class="s">'insert'</span> });
   },
-});</pre></div></div>
-      <div class="code-panel"><div class="code-head"><span class="dot live"></span> what exists in your database</div>
-        <div class="code-body"><pre><span class="c">// durable_workflow_runs — abridged</span>
-{
-  _id: <span class="s">'import:f_31ab'</span>,
-  status: <span class="s">'waiting_signal'</span>,   <span class="c">// parked — for hours or days</span>
-  journal: [
-    { type: <span class="s">'step'</span>, label: <span class="s">'parse'</span>,
-      result: { rows: <span class="s">1204</span> } },
-  ],
-  waitingFor: { signal: <span class="s">'confirmed'</span> },
-}
-<span class="c">// kill the server here. on boot: 'parse' replays from the
-// journal (no re-parse), and the run parks again — same spot.</span></pre></div></div>
+});</pre></div>
     </div>
 
     <div class="jobs">
-      <div class="job"><h3><span class="mono">1</span> · Replay, not recovery</h3>
-        <p>There's no checkpointing layer to bolt on — the journal is written as execution happens. If a
-          replayed operation's inputs no longer match what produced its recorded result, the run fails loudly
-          instead of continuing wrong.</p></div>
-      <div class="job"><h3><span class="mono">2</span> · A progress UI for free</h3>
-        <p>The run document publishes like any other document. Status, current step, and history are
-          subscriptions — no event stream or polling layer to build.</p></div>
-      <div class="job"><h3><span class="mono">3</span> · Fork at any entry</h3>
-        <p>Copy a journal prefix into a new run: the prefix replays, then diverges live. Same history,
-          different future — useful for what-ifs, retries, and tests.</p></div>
-      <div class="job"><h3><span class="mono">4</span> · Audit built in</h3>
-        <p>Every input, output, signal, and sign-off is in the journal, because recording them is how execution
-          works at all. There is no separate audit system to keep honest.</p></div>
+      <div class="job"><code class="job-code">Import(<span class="s">'f_31ab'</span>).watch()</code>
+        <p>Status, current step, history — a subscription, like any document.</p></div>
+      <div class="job"><code class="job-code"><span class="k">await</span> Import.fork(<span class="s">'f_31ab'</span>, <span class="s">'retry'</span>, { at: 1 })</code>
+        <p>Branch a run: the prefix replays, then diverges live.</p></div>
+      <div class="job"><code class="job-code">run.journal</code>
+        <p>The audit trail — already written, because writing it is how execution works.</p></div>
+      <div class="job"><code class="job-code"><span class="err">✗ agent-drift: inputs changed at 'parse'</span></code>
+        <p>Replay is guarded: a mismatch fails loudly, never continues wrong.</p></div>
     </div>
   </div>
 </section>
@@ -435,7 +416,7 @@
   name: <span class="s">'assistant'</span>,
   model: <span class="s">'anthropic:claude-sonnet-5'</span>,
   instructions: <span class="s">'Do the task. Get sign-off before anything irreversible.'</span>,
-  tools: [search, release],   <span class="c">// release parks for a human co-sign</span>
+  tools,          <span class="c">// Meteor.method callables — or gated: 'ask' / 'cosign'</span>
   memory: Brain,
   budget: { steps: <span class="s">8</span>, spend: <span class="s">'$0.50'</span> },
 });</pre></div></div>
@@ -450,7 +431,7 @@
         <p class="journal-tag">→ drain(say×1) · drain(interrupt×1)</p>
       </div>
       <div class="code-panel"><div class="code-head"><span class="dot live"></span> from any client</div>
-        <div class="code-body"><pre>Assistant(id).<span class="f">say</span>(<span class="s">'check the failing tests first'</span>);
+        <div class="code-body"><pre>Assistant(id).<span class="f">say</span>(<span class="s">'…'</span>);       <span class="c">// steering — lands at the next safe point</span>
 Assistant(id).<span class="f">interrupt</span>();     <span class="c">// ESC, durably</span>
 Assistant(id).<span class="f">messages</span>();      <span class="c">// live transcript</span>
 Assistant(id).<span class="f">status</span>();  <span class="c">// thinking · awaiting-approval · idle</span></pre></div></div>
@@ -467,8 +448,8 @@ Assistant(id).<span class="f">status</span>();  <span class="c">// thinking · a
       </div>
       <div class="code-panel"><div class="code-head"><span class="dot live"></span> what-if, for real</div>
         <div class="code-body"><pre><span class="k">const</span> branch = <span class="k">await</span> Assistant(id).<span class="f">fork</span>({
-  before: <span class="s">'think#1.1'</span>,          <span class="c">// the big decision</span>
-  say: <span class="s">'Take the conservative path instead.'</span>,
+  before: <span class="s">'think#1.1'</span>,   <span class="c">// cut at any journal entry</span>
+  say: <span class="s">'…'</span>,              <span class="c">// seed the branch a different instruction</span>
 });
 <span class="c">// same history · different future · zero re-fired effects</span></pre></div></div>
     </div>
