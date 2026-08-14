@@ -479,6 +479,34 @@ Brain(<span class="s">'user/prefs'</span>).<span class="f">watch</span>();      
 
 
 
+<section id="entity">
+  <div class="wrap">
+    <p class="kicker">Meteor.entity</p>
+    <h2>Durable objects: state that can't race.</h2>
+    <p class="lead">A keyed bundle of state and methods with <strong>one serialized queue per key</strong> —
+      calls run in order, no locks, no races. The state is a document, so the client can watch it live.</p>
+    <div class="show">
+      <div class="show-copy">
+        <h3>The state your agents share</h3>
+        <p>Give tools a durable object to read and write, and a fleet of concurrent runs can't corrupt it —
+          the queue <em>is</em> the lock. Addressed like everything else here: by key.</p>
+        <p class="journal-tag">→ one queue per key · reactive state</p>
+      </div>
+      <div class="code-panel"><div class="code-head"><span class="dot live"></span> server/account.js</div>
+        <div class="code-body"><pre><span class="k">export const</span> Account = Meteor.<span class="f">entity</span>({
+  name: <span class="s">'account'</span>,
+  state: () =&gt; ({ active: <span class="k">false</span>, logins: <span class="s">0</span> }),
+  methods: {
+    <span class="f">touch</span>: (s) =&gt; { s.active = <span class="k">true</span>; s.logins += <span class="s">1</span>; },
+  },
+});
+
+<span class="k">await</span> Account(userId).<span class="f">touch</span>();  <span class="c">// queued per key — calls never interleave</span>
+Account(userId).<span class="f">watch</span>();        <span class="c">// live state, on the client</span></pre></div></div>
+    </div>
+  </div>
+</section>
+
 <section id="together">
   <div class="wrap">
     <p class="kicker">Better together</p>
@@ -491,21 +519,14 @@ Brain(<span class="s">'user/prefs'</span>).<span class="f">watch</span>();      
 
     <div class="code-panel" style="max-width: 760px;">
       <div class="code-head"><span class="dot live"></span> the whole feature</div>
-      <div class="code-body"><pre><span class="c">// a durable object: one serialized queue per account       durable:entity</span>
-<span class="k">export const</span> Account = Meteor.<span class="f">entity</span>({
-  name: <span class="s">'account'</span>,
-  state: () =&gt; ({ active: <span class="k">false</span> }),
-  methods: { <span class="f">touch</span>: (s) =&gt; { s.active = <span class="k">true</span>; } },
-});
-
-<span class="c">// one run per signup — exactly-once, across restarts       durable:workflow</span>
+      <div class="code-body"><pre><span class="c">// one run per signup — exactly-once, across restarts       durable:workflow</span>
 Users.<span class="f">trigger</span>({
   cursor: () =&gt; Users.<span class="f">find</span>({ status: <span class="s">'new'</span> }),
   added: (user) =&gt; Onboard.<span class="f">start</span>(user._id),
 });
 
 <span class="c">// inside Onboard.run, after the two-day sleep:</span>
-<span class="k">const</span> { active } = <span class="k">await</span> Account(userId).<span class="f">state</span>();
+<span class="k">const</span> { active } = <span class="k">await</span> Account(userId).<span class="f">state</span>();  <span class="c">// the durable object above</span>
 <span class="k">if</span> (!active) {
   <span class="k">const</span> note = <span class="k">await</span> <span class="k">this</span>.<span class="f">step</span>(() =&gt;                <span class="c">// durable:agent</span>
     Assistant.<span class="f">ask</span>(<span class="s">'Quiet first week. Draft a friendly check-in.'</span>));
