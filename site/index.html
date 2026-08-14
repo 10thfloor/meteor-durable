@@ -485,6 +485,45 @@ Brain(<span class="s">'user/prefs'</span>).<span class="f">watch</span>();      
   </div>
 </section>
 
+<section id="together">
+  <div class="wrap">
+    <p class="kicker">Better together</p>
+    <h2>One signup, four packages</h2>
+    <p class="lead">They compose because they share two things: the journal and your database. A trigger starts
+      an <strong>exactly-once</strong> run per new user. The workflow owns the calendar. A durable object owns
+      per-account state — one serialized queue per key, so there's no race to reason about. The agent contributes
+      a single journaled turn of judgment. And MCP opens the same flow to any outside agent — gates included.</p>
+
+    <div class="code-panel" style="max-width: 760px;">
+      <div class="code-head"><span class="dot live"></span> the whole feature</div>
+      <div class="code-body"><pre><span class="c">// a durable object: one serialized queue per account       durable:entity</span>
+<span class="k">export const</span> Account = Meteor.<span class="f">entity</span>({
+  name: <span class="s">'account'</span>,
+  state: () =&gt; ({ active: <span class="k">false</span> }),
+  methods: { <span class="f">touch</span>: (s) =&gt; { s.active = <span class="k">true</span>; } },
+});
+
+<span class="c">// one run per signup — exactly-once, across restarts       durable:workflow</span>
+Users.<span class="f">trigger</span>({
+  cursor: () =&gt; Users.<span class="f">find</span>({ status: <span class="s">'new'</span> }),
+  added: (user) =&gt; Onboard.<span class="f">start</span>(user._id),
+});
+
+<span class="c">// inside Onboard.run, after the two-day sleep:</span>
+<span class="k">const</span> { active } = <span class="k">await</span> Account(userId).<span class="f">state</span>();
+<span class="k">if</span> (!active) {
+  <span class="k">const</span> note = <span class="k">await</span> <span class="k">this</span>.<span class="f">step</span>(() =&gt;                <span class="c">// durable:agent</span>
+    Assistant.<span class="f">ask</span>(<span class="s">'Quiet first week. Draft a friendly check-in.'</span>));
+  <span class="k">await</span> <span class="k">this</span>.<span class="f">step</span>(() =&gt; Email.<span class="f">send</span>(userId, note), { label: <span class="s">'nudge'</span> });
+}
+
+<span class="c">// the same flow, callable by any MCP client               durable:mcp</span>
+MCP.<span class="f">server</span>(<span class="s">'app'</span>, { auth: <span class="s">'accounts'</span>,
+  tools: { onboarding_status: MCP.<span class="f">expose</span>(status) } });</pre></div>
+    </div>
+  </div>
+</section>
+
 <section id="packages">
   <div class="wrap">
     <p class="kicker">On Atmosphere</p>
