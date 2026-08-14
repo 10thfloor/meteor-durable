@@ -386,10 +386,11 @@
         <p>Status, current step, history — a subscription, like any document.</p></div>
       <div class="job"><code class="job-code"><span class="k">await</span> Onboard.fork(<span class="s">'u_31ab'</span>, <span class="s">'retry'</span>, { at: 1 })</code>
         <p>Branch a run: the prefix replays, then diverges live.</p></div>
-      <div class="job"><code class="job-code">run.journal</code>
-        <p>The audit trail — already written, because writing it is how execution works.</p></div>
-      <div class="job"><code class="job-code"><span class="err">✗ replay mismatch at 'welcome' — failing loudly</span></code>
-        <p>Replay is guarded: drifted inputs stop the run, never continue it wrong.</p></div>
+      <div class="job"><code class="job-code">Onboard.runs({ status: <span class="s">'sleeping'</span> })</code>
+        <p>Everything in flight right now — the ops dashboard is one query.</p></div>
+      <div class="job"><code class="job-code">db.durable_workflow_runs.findOne(<span class="s">'onboard:u_31ab'</span>)</code>
+        <p>No black box: a run's full history — every input, output, and timestamp — is a document you can
+          open in mongosh.</p></div>
     </div>
   </div>
 </section>
