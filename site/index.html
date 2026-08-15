@@ -507,6 +507,39 @@ Account(userId).<span class="f">watch</span>();        <span class="c">// live s
   </div>
 </section>
 
+<section id="sandbox">
+  <div class="wrap">
+    <p class="kicker">Meteor.sandbox</p>
+    <h2>A computer for your agents.</h2>
+    <p class="lead">Keyed, provider-isolated boxes where agents work without approval ceremony — the
+      <strong>boundary</strong> is what's gated: <code>export()</code> parks the run for a human before anything
+      leaves. Idle boxes hibernate to their last snapshot and rematerialize on the next command.</p>
+    <div class="show">
+      <div class="show-copy">
+        <h3>Fork the run, fork the disk</h3>
+        <p>Execs are journal entries — replay after a crash returns the recorded result, so shell commands run
+          at most once. And each result carries a snapshot id, so a forked run rematerializes the filesystem
+          <em>as it was at the cut</em>. Two timelines, two disks, one ancestry.</p>
+        <p class="journal-tag">→ exec · snap: 'sbx-…' · rematerializing from snapshot</p>
+      </div>
+      <div class="code-panel"><div class="code-head"><span class="dot live"></span> server/workbench.js</div>
+        <div class="code-body"><pre><span class="k">export const</span> Box = Meteor.<span class="f">sandbox</span>({
+  name: <span class="s">'workbench'</span>,
+  image: <span class="s">'node:22-bookworm'</span>,
+  net: <span class="s">'deny'</span>,                  <span class="c">// nothing leaves without a gate</span>
+  idle: <span class="s">'10 m'</span>,                 <span class="c">// hibernate to the last snapshot</span>
+});
+
+Meteor.<span class="f">agent</span>({ name: <span class="s">'assistant'</span>, sandbox: Box });
+<span class="c">// exec / write_file / read_file injected, ungated;
+// export(path) crosses the border → parks for approve()</span>
+
+<span class="k">await</span> Box(taskId).<span class="f">exec</span>(<span class="s">'npm test'</span>);
+<span class="c">// → { code: 1, stdout: 'FAIL…', snap: 'sbx-workbench:sd0f4…' }</span></pre></div></div>
+    </div>
+  </div>
+</section>
+
 <section id="together">
   <div class="wrap">
     <p class="kicker">Better together</p>
