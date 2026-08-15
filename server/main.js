@@ -4,6 +4,7 @@ import { Expenses, Payments } from '/imports/ledger-core';
 import { Treasury, TREASURY_THRESHOLD } from '/server/ledger';
 import { selfTest, dkgSelfTest } from '/imports/frost/frost';
 import '/server/agent-demo';
+import '/server/sandbox-demo';
 
 // Fixed dev token so the MCP agent can authenticate (Bearer <token>).
 export const AGENT_TOKEN = 'redacted-demo-token';
@@ -52,3 +53,4 @@ Meteor.publish('expenses.all', () => Expenses.find({}, { sort: { submittedAt: -1
 Meteor.publish('payments.all', () => Payments.find({}, { sort: { at: -1 } }));
 Meteor.publish('users.public', () =>
   Meteor.users.find({}, { fields: { username: 1, 'profile.role': 1 } }));
+

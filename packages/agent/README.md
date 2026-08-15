@@ -155,6 +155,8 @@ Meteor.agent({
   as: 'username',                       // userId the agent's tools run as
   budget: { turns: 20, steps: 8, idle: '1 h', approval: '30 m', spend: '$1.00' },
   context: { window: 200000, compactAt: 0.8, keep: 6 },   // auto-compaction
+  sandbox: Box,                         // durable:sandbox handle: injects exec/write/read
+                                        // + gated export; fork() seeds the branch's box
   memory: Brain,                        // durable:memory handle (or { handle, scope }):
                                         // injects remember/recall, compaction distills
                                         // into it, and yields auto-checkpoint
@@ -198,7 +200,7 @@ package is how little is left once Meteor's primitives do the heavy lifting.
 ## Family
 
 `durable:workflow` · `durable:entity` · `durable:keyring` · `durable:lens` ·
-`durable:mcp` · `durable:agent` · `durable:memory`
+`durable:mcp` · `durable:agent` · `durable:memory` · `durable:sandbox`
 
 ## License
 

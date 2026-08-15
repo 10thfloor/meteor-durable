@@ -211,6 +211,47 @@ function normalizeMemory(spec, agentName) {
   throw new Error('Meteor.agent memory: pass a Meteor.memory handle or { handle, scope }');
 }
 
+// ── sandbox: a durable:sandbox handle gives the agent a computer ──
+// Free inside, gated at the border: exec/write/read run without ceremony
+// (that's what the isolation is FOR); `export` — the boundary crossing —
+// carries an 'ask' gate by default. Every exec/write records a snapshot id
+// in its journaled result, which is what lets fork() fork the filesystem.
+function normalizeSandbox(spec) {
+  if (!spec) return null;
+  if (spec.sandboxName) return { handle: spec, scope: ({ key }) => key, export: 'ask' };
+  if (spec.handle?.sandboxName) {
+    return { handle: spec.handle, scope: spec.scope || (({ key }) => key), export: spec.export ?? 'ask', onExport: spec.onExport };
+  }
+  throw new Error('Meteor.agent sandbox: pass a Meteor.sandbox handle or { handle, scope, export }');
+}
+
+const sandboxTools = (sbx) => [
+  {
+    name: 'exec', description: 'Run a shell command in the sandbox workdir',
+    schema: { cmd: String }, gate: 'auto', kind: 'sandbox',
+    invoke: (args, meta) => sbx.handle(sbx.scope(meta)).exec(String(args.cmd)),
+  },
+  {
+    name: 'write_file', description: 'Write a file in the sandbox workdir',
+    schema: { path: String, content: String }, gate: 'auto', kind: 'sandbox',
+    invoke: (args, meta) => sbx.handle(sbx.scope(meta)).write(String(args.path), String(args.content)),
+  },
+  {
+    name: 'read_file', description: 'Read a file from the sandbox workdir',
+    schema: { path: String }, gate: 'auto', kind: 'sandbox',
+    invoke: (args, meta) => sbx.handle(sbx.scope(meta)).read(String(args.path)),
+  },
+  {
+    name: 'export', description: 'Bring a file OUT of the sandbox (crosses the boundary — needs approval)',
+    schema: { path: String }, gate: 'ask', kind: 'sandbox',
+    invoke: async (args, meta) => {
+      const content = await sbx.handle(sbx.scope(meta)).read(String(args.path));
+      if (sbx.onExport) await sbx.onExport({ path: String(args.path), content, meta });
+      return { path: String(args.path), content };
+    },
+  },
+];
+
 const memoryTools = (mem) => [
   {
     name: 'remember', description: 'Save a durable fact to long-term memory',
@@ -336,7 +377,9 @@ Meteor.agent = function agent(def) {
   if (!def.name) throw new Error('Meteor.agent requires a name');
   if (!def.model) throw new Error('Meteor.agent requires a model (name, or { complete })');
   const mem = normalizeMemory(def.memory, def.name);
-  const tools = [...(def.tools || []).map(normalizeTool), ...(mem ? memoryTools(mem) : [])];
+  const sbx = normalizeSandbox(def.sandbox);
+  const sbxTools = sbx ? sandboxTools(sbx).map((t) => (t.name === 'export' ? { ...t, gate: sbx.export } : t)) : [];
+  const tools = [...(def.tools || []).map(normalizeTool), ...(mem ? memoryTools(mem) : []), ...sbxTools];
   const toolByName = new Map(tools.map((t) => [t.name, t]));
   const toolSchemas = tools.map((t) => ({ name: t.name, description: t.description, schema: t.schema }));
   const budget = parseBudget(def.budget);
@@ -474,7 +517,7 @@ Meteor.agent = function agent(def) {
     return out;
   };
 
-  registry.set(def.name, { def, handle, wf, tools, toolByName, budget });
+  registry.set(def.name, { def, handle, wf, tools, toolByName, budget, sbx });
   return handle;
 };
 
@@ -496,6 +539,19 @@ async function forkAgent(name, key, opts = {}) {
   const newKey = opts.key || `${key}~${Random.id(4)}`;
   const signals = opts.say != null ? [{ name: 'say', payload: { text: String(opts.say), followUp: false } }] : [];
   await entry.wf.fork(key, newKey, { at, signals });
+  // Fork the computer too: seed the branch's sandbox from the last snapshot
+  // recorded in the shared journal prefix, so its filesystem is exactly what
+  // the parent's was at the cut point.
+  if (entry.sbx) {
+    let snap = null;
+    for (const e of src.journal.slice(0, at)) {
+      const s = e?.result?.result?.snap;
+      if (e.type === 'step' && /^act:(exec|write_file)#/.test(e.label ?? '') && s) snap = s;
+    }
+    if (snap) {
+      await entry.sbx.handle._seed(entry.sbx.scope({ key: newKey, root: newKey.split('~')[0], agent: name }), snap);
+    }
+  }
   return newKey;
 }
 

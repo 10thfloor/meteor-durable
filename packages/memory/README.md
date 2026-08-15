@@ -105,7 +105,7 @@ DDP methods (`durable.memory.<name>.*`) require a signed-in user; the
 ## Family
 
 `durable:workflow` · `durable:entity` · `durable:keyring` · `durable:lens` ·
-`durable:mcp` · `durable:agent` · `durable:memory`
+`durable:mcp` · `durable:agent` · `durable:memory` · `durable:sandbox`
 
 ## License
 

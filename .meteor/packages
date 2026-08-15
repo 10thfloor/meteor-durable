@@ -32,3 +32,4 @@ accounts-base
 accounts-password
 durable:agent
 durable:memory
+durable:sandbox

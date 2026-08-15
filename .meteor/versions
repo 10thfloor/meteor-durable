@@ -28,6 +28,7 @@ durable:keyring@0.1.0
 durable:lens@0.1.0
 durable:mcp@0.1.0
 durable:memory@0.1.0
+durable:sandbox@0.1.0
 durable:workflow@0.1.0
 dynamic-import@0.7.4
 ecmascript@0.16.10
