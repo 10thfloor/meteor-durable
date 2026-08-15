@@ -320,14 +320,15 @@
       <div class="term-head"><span class="dot live"></span><span class="dot"></span><span class="dot"></span>
         when the server dies mid-run<button class="replay-btn" id="replay">▶ replay</button></div>
       <div class="term-body"><ol id="termlines">
-        <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># your app</span></li>
+        <li class="t-cmd"><span class="t-dollar">$</span> meteor shell <span class="t-dim"># a REPL into your running app</span></li>
         <li><span class="t-dim">></span> Assistant('t_31ab').say('take it from here')</li>
         <li><span class="t-dim">think#1.0</span>&nbsp;&nbsp;&nbsp; planning the work</li>
         <li><span class="t-dim">act:search</span>&nbsp;&nbsp; { hits: 12 }</li>
         <li><span class="t-dim">ask:apply</span>&nbsp;&nbsp;&nbsp; parked — waiting for a human to rule</li>
         <li class="t-kill">⚡ kill -9 51833 <span class="t-note"># deploy, OOM, whatever</span></li>
-        <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># later that day…</span></li>
+        <li class="t-cmd"><span class="t-dollar">$</span> meteor <span class="t-dim"># just start it again</span></li>
         <li class="t-ok">✓ resuming agent:assistant:t_31ab (was: parked @ receive(approval))</li>
+        <li class="t-cmd"><span class="t-dollar">$</span> meteor shell <span class="t-dim"># later that day…</span></li>
         <li><span class="t-dim">></span> Assistant('t_31ab').approve() <span class="t-dim"># the approval outlived the process</span></li>
         <li><span class="t-dim">act:apply</span>&nbsp;&nbsp;&nbsp;&nbsp; done</li>
         <li><span class="t-dim">think#1.1</span>&nbsp;&nbsp;&nbsp; task complete</li>
