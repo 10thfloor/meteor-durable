@@ -1,8 +1,11 @@
-# Ledger — five durable Meteor primitives, composed
+# meteor-durable — the LLM harness for Meteor
 
-Five imagined Meteor primitives, built for real as local Atmosphere packages
-(`packages/`), composed into an expense app where an AI agent does the triage,
-3-of-5 humans hold the keys, and every long-running thing survives a `kill -9`.
+**Site: https://10thfloor.github.io/meteor-durable/**
+
+Eight imagined Meteor primitives, built for real as local Atmosphere packages
+(`packages/`) — workflow, entity, keyring, lens, mcp, agent, memory, sandbox —
+composed into an expense app where an AI agent does the triage, 3-of-5 humans
+hold the keys, and every long-running thing survives a `kill -9`.
 
 Born from a design conversation: *Meteor made realtime a default instead of a
 feature; these make durability a default instead of a feature — and because the
