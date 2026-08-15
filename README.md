@@ -35,17 +35,20 @@ Open http://localhost:3000 — sign in as `frank` (any seeded user, password
 `password`), submit an expense, watch the pipeline. Approvers: `alice`,
 `bob`, `carol`, `dave`, `eve`.
 
-The agent's front door (token printed at boot):
+The agent's front door — grab the per-install token from the boot log
+(`[mcp] agent auth: Authorization: Bearer …`):
 
 ```bash
+export AGENT_TOKEN='<token from the boot log>'
+
 # what the agent sees — the lens view, three fields, nothing else
 curl -s -X POST http://localhost:3000/mcp/ledger \
-  -H 'Authorization: Bearer redacted-demo-token' -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $AGENT_TOKEN" -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"ledger://expenses/pending"}}'
 
 # record a verdict (starts the money moving — pending 3-of-5 human signatures)
 curl -s -X POST http://localhost:3000/mcp/ledger \
-  -H 'Authorization: Bearer redacted-demo-token' -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $AGENT_TOKEN" -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"triage","arguments":{"expenseId":"<id>","verdict":"approve"}}}'
 ```
 
