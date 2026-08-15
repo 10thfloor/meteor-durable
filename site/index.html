@@ -420,20 +420,6 @@ Assistant(id).<span class="f">status</span>();  <span class="c">// thinking · a
 <span class="c">// same history · different future · zero re-fired effects</span></pre></div></div>
     </div>
 
-    <div class="show flip">
-      <div class="show-copy">
-        <h3>Memory with three doors</h3>
-        <p>Long-term memory is a keyed, searchable store shared by your agents, any MCP client (Claude Desktop,
-          Cursor…), and a live panel users can see. Checkpoints come from the journal — no honor system.</p>
-        <p class="journal-tag">→ compact#0 · remember · recall</p>
-      </div>
-      <div class="code-panel"><div class="code-head"><span class="dot live"></span> one brain, three doors</div>
-        <div class="code-body"><pre><span class="k">export const</span> Brain = Meteor.<span class="f">memory</span>({ name: <span class="s">'brain'</span> });
-
-Meteor.<span class="f">agent</span>({ name: <span class="s">'assistant'</span>, memory: Brain }); <span class="c">// agents</span>
-MCP.<span class="f">server</span>(<span class="s">'brain'</span>, { tools: Brain.<span class="f">mcpTools</span>() });   <span class="c">// MCP clients</span>
-Brain(<span class="s">'user/prefs'</span>).<span class="f">watch</span>();                        <span class="c">// humans, live</span></pre></div></div>
-    </div>
   </div>
 </section>
 
@@ -536,6 +522,36 @@ Meteor.<span class="f">agent</span>({ name: <span class="s">'assistant'</span>, 
 
 <span class="k">await</span> Box(taskId).<span class="f">exec</span>(<span class="s">'npm test'</span>);
 <span class="c">// → { code: 1, stdout: 'FAIL…', snap: 'sbx-workbench:sd0f4…' }</span></pre></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="memory">
+  <div class="wrap">
+    <p class="kicker">Meteor.memory</p>
+    <h2>One brain, three doors.</h2>
+    <p class="lead">Long-term memory as app state: keyed scopes, full-text recall, and exactly-once formation —
+      compaction distills facts <strong>inside the journaled step</strong>. Working memory needs no store at
+      all; it's the journal.</p>
+    <div class="show">
+      <div class="show-copy">
+        <h3>Your agents, any MCP client, your users</h3>
+        <p>One store serves in-app agents (<code>remember</code>/<code>recall</code> tools), any client speaking
+          the standard MCP memory protocol — point Claude Desktop at <code>/mcp/brain</code> — and a live panel
+          where users see what's known about them. Checkpoints answer from the journal, not the honor
+          system.</p>
+        <p class="journal-tag">→ remember · recall · memory_get_last</p>
+      </div>
+      <div class="code-panel"><div class="code-head"><span class="dot live"></span> server/brain.js</div>
+        <div class="code-body"><pre><span class="k">export const</span> Brain = Meteor.<span class="f">memory</span>({ name: <span class="s">'brain'</span> });
+
+Meteor.<span class="f">agent</span>({ name: <span class="s">'assistant'</span>, memory: Brain });  <span class="c">// door 1: agents</span>
+MCP.<span class="f">server</span>(<span class="s">'brain'</span>, { auth: <span class="s">'accounts'</span>,
+  tools: Brain.<span class="f">mcpTools</span>() });                        <span class="c">// door 2: /mcp/brain</span>
+Brain(<span class="s">'user/prefs'</span>).<span class="f">watch</span>();                         <span class="c">// door 3: humans, live</span>
+
+<span class="k">await</span> Brain(<span class="s">'user/prefs'</span>).<span class="f">remember</span>(<span class="s">'Prefers weekly summaries'</span>);
+<span class="k">await</span> Brain(<span class="s">'user/prefs'</span>).<span class="f">recall</span>(<span class="s">'summaries'</span>);      <span class="c">// full-text, scoped</span></pre></div></div>
     </div>
   </div>
 </section>
