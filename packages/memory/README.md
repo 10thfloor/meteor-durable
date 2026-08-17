@@ -99,7 +99,10 @@ DDP methods (`durable.memory.<name>.*`) require a signed-in user; the
 
 - Facts are EJSON documents; text search is Mongo `$text` (language-stemmed,
   no vector similarity — embeddings would slot in as another index).
-- No per-scope ACLs yet: any signed-in user can write any scope over DDP/MCP.
+- Per-scope access control: pass `access: ({ userId, scope, op }) => bool`
+  (op is `'read'` or `'write'`); it gates the DDP methods, the MCP tools, and
+  the publication. Default: any signed-in user — set a real tenant policy,
+  e.g. ``({ userId, scope }) => scope === `user/${userId}` ``.
 - Checkpoint is single-slot per scope (`__last`), matching mcp-memory.
 
 ## Family

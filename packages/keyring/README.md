@@ -121,8 +121,13 @@ This is a proof-of-concept, not audited for production use.
   production would add device-held backups or resharing.
 - **All `n` custodians must be online** to run the ceremony (true of any DKG).
 - Reactive resharing when the custodian set changes is not implemented.
-- Method execution is at-least-once if the server dies mid-run — make the
-  downstream idempotent.
+- Crash recovery is **at-most-once by default**: an op that dies mid-execution
+  parks as `interrupted` (the action may or may not have run) until someone
+  calls `keyring.resolveInterrupted(opId, { outcome })`. Declare a method
+  `retry: true` to assert it's idempotent and re-enter signing instead —
+  `run()` receives `this.opId` so actions can key their side effects on it.
+- One *active* op per `(keyring, method, args)` is enforced by a unique
+  partial index, so concurrent identical calls join the same op.
 
 ## Family
 

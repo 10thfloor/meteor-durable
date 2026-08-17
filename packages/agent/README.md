@@ -162,6 +162,8 @@ Meteor.agent({
                                         // into it, and yields auto-checkpoint
   compact: (head, model) => summary,    // custom compactor (default: ask the model)
   approve: ({ userId }) => bool,        // who may approve ask-gates (default: any user)
+  allow: ({ userId, key, action }) => bool,   // gates say/interrupt/stop/compact/fork/watch
+                                        // over DDP + publications (default: signed-in)
   maxResultChars: 8000,                 // tool results truncated past this
   on: { beforeThink, afterThink, beforeTool, afterTool, onEnd },  // hooks;
                                         // beforeTool may veto: return false | { deny, reason }

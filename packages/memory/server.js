@@ -10,6 +10,15 @@ import { MCP } from 'meteor/durable:mcp';
 // compaction and `remember` distill out of it.
 export const Memories = new Mongo.Collection('durable_memories');
 
+const registry = new Map(); // memory name -> { def, access }
+
+// Default policy: any signed-in user. Scopes are app-defined, so real tenant
+// isolation is the app's `access` hook, e.g.
+//   access: ({ userId, scope }) => scope === `user/${userId}`
+// The server-side handle bypasses this (trusted code path); DDP methods, the
+// MCP tools built on them, and the publication all enforce it.
+const defaultAccess = ({ userId }) => !!userId;
+
 Meteor.startup(async () => {
   const raw = Memories.rawCollection();
   await raw.createIndex({ text: 'text', tags: 'text' }, { name: 'memory_text' }).catch((e) => console.error('[durable:memory] text index:', e.message));
@@ -89,26 +98,33 @@ Meteor.memory = function memory(def) {
   });
   handle.memoryName = name;
 
-  // ── DDP methods (auth: signed-in users) — the client handle calls these ──
-  const m = (suffix, schema, run) => Meteor.method({
+  const access = def.access ?? defaultAccess;
+  registry.set(name, { def, access });
+
+  // ── DDP methods — the client handle and MCP tools call these; every one
+  //    runs the access hook with the resolved scope and operation kind ──
+  const ns = { namespace: Match.Optional(String) };
+  const scopeOf = (a) => a.namespace ?? 'default';
+  const m = (suffix, schema, run, op = 'write') => Meteor.method({
     name: `durable.memory.${name}.${suffix}`,
     schema,
     async run(args) {
       if (!this.userId) throw new Meteor.Error('not-authorized', 'sign in to use memory');
+      if (!(await access({ userId: this.userId, scope: scopeOf(args), op }))) {
+        throw new Meteor.Error('not-authorized', `memory access denied (${op} on '${scopeOf(args)}')`);
+      }
       return run(args);
     },
   });
-  const ns = { namespace: Match.Optional(String) };
-  const scopeOf = (a) => a.namespace ?? 'default';
   const methods = {
     store: m('store', { content: String, key: Match.Optional(String), tags: Match.Optional([String]), ...ns },
       (a) => store(name, scopeOf(a), { text: a.content, key: a.key, tags: a.tags })),
     retrieve: m('retrieve', { key: String, ...ns },
-      (a) => get(name, scopeOf(a), a.key)),
+      (a) => get(name, scopeOf(a), a.key), 'read'),
     search: m('search', { query: String, tags: Match.Optional([String]), limit: Match.Optional(Number), ...ns },
-      (a) => search(name, scopeOf(a), { query: a.query, tags: a.tags, limit: a.limit })),
+      (a) => search(name, scopeOf(a), { query: a.query, tags: a.tags, limit: a.limit }), 'read'),
     get_last: m('get_last', { ...ns },
-      (a) => checkpointGet(name, scopeOf(a))),
+      (a) => checkpointGet(name, scopeOf(a)), 'read'),
     update_last: m('update_last', { content: String, ...ns },
       (a) => checkpointSet(name, scopeOf(a), a.content)),
     forget: m('forget', { key: String, ...ns },
@@ -127,7 +143,10 @@ Meteor.memory = function memory(def) {
   return handle;
 };
 
-Meteor.publish('durable.memory.scope', function publishScope(name, scope) {
+Meteor.publish('durable.memory.scope', async function publishScope(name, scope) {
   check(name, String); check(scope, String);
+  const entry = registry.get(name);
+  if (!this.userId || !entry) return this.ready();
+  if (!(await entry.access({ userId: this.userId, scope, op: 'read' }))) return this.ready();
   return Memories.find({ memory: name, scope }, { sort: { updatedAt: -1 }, limit: 200 });
 });

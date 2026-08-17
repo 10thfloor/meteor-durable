@@ -33,10 +33,15 @@ function parseDur(v, fallback) {
 
 const trunc = (s, n) => (s && s.length > n ? `${s.slice(0, n)}…[+${s.length - n}]` : s ?? '');
 
-// Paths stay inside the workdir — no absolute paths, no escapes.
+// Paths stay inside the workdir — no absolute paths, no escapes, and a strict
+// charset so a path can never smuggle shell syntax or argv options (no leading
+// '-', no quotes, no spaces). File ops additionally run argv-style, shell-free.
 function safePath(p) {
   const norm = path.posix.normalize(String(p));
   if (norm.startsWith('/') || norm.startsWith('..')) throw new Meteor.Error('sandbox-path', `Path escapes the workdir: ${p}`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(norm)) {
+    throw new Meteor.Error('sandbox-path', `Path has disallowed characters: ${p}`);
+  }
   return norm;
 }
 
@@ -74,13 +79,24 @@ const dockerProvider = {
     if (net !== 'allow') args.push('--network', 'none');
     if (limits?.mem) args.push('--memory', String(limits.mem));
     if (limits?.cpus) args.push('--cpus', String(limits.cpus));
+    if (limits?.pids) args.push('--pids-limit', String(limits.pids));
     args.push(image, 'sh', '-lc', 'mkdir -p /work && exec sleep infinity');
     const r = await docker(args, { timeout: 60000 });
     if (r.code !== 0) throw new Meteor.Error('sandbox-provider', `docker run failed: ${trunc(r.stderr, 400)}`);
     return ctr;
   },
-  exec: (ctr, cmd, opts = {}) =>
-    docker(['exec', '-w', '/work', ctr, 'sh', '-lc', cmd], { timeout: opts.timeout ?? 60000 }),
+  // Deadlines run under coreutils `timeout` INSIDE the container, so hitting
+  // one kills the actual process — not just our docker CLI call. (TERM at the
+  // deadline, KILL 5s later.)
+  exec: (ctr, cmd, opts = {}) => {
+    const ms = opts.timeout ?? 60000;
+    const secs = Math.max(1, Math.ceil(ms / 1000));
+    return docker(['exec', '-w', '/work', ctr, 'timeout', '-k', '5', String(secs), 'sh', '-lc', cmd],
+      { timeout: ms + 10000 });
+  },
+  // argv form — no shell involved; used for every op that takes a path
+  raw: (ctr, argv, opts = {}) =>
+    docker(['exec', '-w', '/work', ctr, ...argv], { timeout: opts.timeout ?? 30000 }),
   async snapshot(ctr, name) {
     const tag = `sbx-${name}:s${Random.hexString(10)}`;
     const r = await docker(['commit', ctr, tag], { timeout: 60000 });
@@ -89,7 +105,7 @@ const dockerProvider = {
   },
   async write(ctr, rel, content) {
     const dir = path.posix.dirname(rel);
-    if (dir && dir !== '.') await this.exec(ctr, `mkdir -p '${dir}'`);
+    if (dir && dir !== '.') await this.raw(ctr, ['mkdir', '-p', dir]);
     const tmp = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'sbx-')), 'f');
     await fs.writeFile(tmp, content);
     const r = await docker(['cp', tmp, `${ctr}:/work/${rel}`], { timeout: 30000 });
@@ -97,6 +113,7 @@ const dockerProvider = {
     if (r.code !== 0) throw new Meteor.Error('sandbox-provider', `docker cp failed: ${trunc(r.stderr, 400)}`);
   },
   destroy: (ctr) => docker(['rm', '-f', ctr], { timeout: 30000 }),
+  removeSnapshot: (tag) => docker(['rmi', '-f', tag], { timeout: 30000 }),
 };
 providers.set('docker', dockerProvider);
 
@@ -118,8 +135,10 @@ Meteor.sandbox = function sandbox(def) {
   const cfg = {
     image: def.image ?? 'node:22-bookworm',
     net: def.net ?? 'deny',
-    limits: def.limits ?? {},
+    // resource limits on by DEFAULT — opt out explicitly if you must
+    limits: { cpus: 1, mem: '512m', pids: 256, ...(def.limits ?? {}) },
     idle: parseDur(def.idle, 10 * DUR.m),
+    keepSnaps: def.keepSnaps ?? 5,
     provider: def.provider ?? 'docker',
   };
   const provider = providers.get(cfg.provider);
@@ -151,6 +170,28 @@ Meteor.sandbox = function sandbox(def) {
     });
   }
 
+  // Snapshot retention: keep the newest `keepSnaps` per box; provider-delete
+  // the rest — except tags some box (e.g. a fork seed) still materializes from.
+  async function recordSnap(key, snap) {
+    if (!snap) return;
+    const _id = docId(key);
+    const doc = await SandboxBoxes.findOneAsync(_id);
+    let snaps = [...(doc?.snaps ?? []), snap];
+    const excess = snaps.length - cfg.keepSnaps;
+    if (excess > 0) {
+      const candidates = snaps.slice(0, excess);
+      const referenced = new Set(
+        (await SandboxBoxes.find({ lastSnap: { $in: candidates } }).fetchAsync()).map((d) => d.lastSnap),
+      );
+      snaps = snaps.slice(excess);
+      for (const tag of candidates) {
+        if (referenced.has(tag)) snaps.unshift(tag);
+        else await provider.removeSnapshot?.(tag);
+      }
+    }
+    await SandboxBoxes.updateAsync(_id, { $set: { snaps } });
+  }
+
   const handle = (key) => ({
     // Snapshot policy: exec snapshots by default (that's where state advances);
     // writes don't (the next exec's snapshot captures them, and journal replay
@@ -162,6 +203,7 @@ Meteor.sandbox = function sandbox(def) {
       const snap = opts.snap === false ? null
         : await provider.snapshot(ctr, name).catch((e) => { console.warn(`[durable:sandbox] snapshot failed: ${e.message}`); return null; });
       await logOp(key, { cmd: trunc(cmd, 200), code: r.code, out: trunc(`${r.stdout}${r.stderr}`, 2000), snap }, snap ? { lastSnap: snap } : {});
+      await recordSnap(key, snap);
       return { code: r.code, stdout: r.stdout, stderr: r.stderr, snap };
     }),
     write: (rel, content, opts = {}) => enqueue(docId(key), async () => {
@@ -173,24 +215,26 @@ Meteor.sandbox = function sandbox(def) {
         ? await provider.snapshot(ctr, name).catch(() => null)
         : null;
       await logOp(key, { cmd: `write ${p} (${content.length}b)`, code: 0, snap }, snap ? { lastSnap: snap } : {});
+      await recordSnap(key, snap);
       return { ok: true, path: p, snap };
     }),
     read: (rel) => enqueue(docId(key), async () => {
       const p = safePath(rel);
       const ctr = await materialize(key);
-      const r = await provider.exec(ctr, `cat '${p}'`);
+      const r = await provider.raw(ctr, ['cat', p]);
       if (r.code !== 0) throw new Meteor.Error('sandbox-read', trunc(r.stderr, 300));
       return r.stdout;
     }),
     ls: (rel = '.') => enqueue(docId(key), async () => {
       const ctr = await materialize(key);
-      const r = await provider.exec(ctr, `find '${safePath(rel)}' -maxdepth 2 | sort`);
-      return r.stdout.trim().split('\n').filter(Boolean);
+      const r = await provider.raw(ctr, ['find', safePath(rel), '-maxdepth', '2']);
+      return r.stdout.trim().split('\n').filter(Boolean).sort();
     }),
     snap: () => enqueue(docId(key), async () => {
       const ctr = await materialize(key);
       const snap = await provider.snapshot(ctr, name);
       await logOp(key, { cmd: 'snapshot', code: 0, snap }, { lastSnap: snap });
+      await recordSnap(key, snap);
       return snap;
     }),
     destroy: () => enqueue(docId(key), async () => {
@@ -217,7 +261,7 @@ Meteor.sandbox = function sandbox(def) {
   };
   handle.boxes = (selector = {}) => SandboxBoxes.find({ sandbox: name, ...selector });
 
-  registry.set(name, { def, cfg, handle });
+  registry.set(name, { def, cfg, handle, recordSnap });
   return handle;
 };
 
@@ -226,7 +270,7 @@ Meteor.sandbox.provider = (name, impl) => { providers.set(name, impl); return im
 // ── hibernation: idle instances shrink to their last snapshot ──
 Meteor.setInterval(async () => {
   const now = Date.now();
-  for (const [name, { cfg }] of registry) {
+  for (const [name, { cfg, recordSnap }] of registry) {
     const stale = await SandboxBoxes.find({ sandbox: name, status: 'running' }).fetchAsync();
     for (const doc of stale) {
       if (!doc.idleAt || now - new Date(doc.idleAt).getTime() < cfg.idle) continue;
@@ -238,6 +282,7 @@ Meteor.setInterval(async () => {
           $set: { status: 'cold', containerId: null, ...(snap ? { lastSnap: snap } : {}), updatedAt: new Date() },
           $push: { log: { $each: [{ cmd: 'hibernate', code: 0, snap, at: new Date() }], $slice: -30 } },
         });
+        if (snap && snap !== doc.lastSnap) await recordSnap(doc.key, snap);
         console.log(`[durable:sandbox] hibernated ${doc._id} → ${snap ?? '(no snapshot)'}`);
       });
     }

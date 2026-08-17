@@ -12,6 +12,32 @@ const executing = new Set(); // run docIds currently executing in this process
 
 const runIdFor = (name, key) => `${name}:${key}`;
 
+// ── executor lease: exactly-once across PROCESSES, not just within one ──
+// The in-memory Set only guards this process; the lease is a CAS on the run
+// doc so a second app instance can't execute the same run concurrently. The
+// holder heartbeats while the run is live (including long parks); if the
+// process dies, the lease expires and any instance may resume the run.
+const EXECUTOR_ID = `${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
+const LEASE_MS = 30000;
+
+async function claimLease(docId) {
+  const now = Date.now();
+  const n = await WorkflowRuns.updateAsync(
+    {
+      _id: docId,
+      status: { $nin: ['done', 'failed', 'rejected'] },
+      $or: [
+        { lease: { $exists: false } },
+        { lease: null },
+        { 'lease.until': { $lt: new Date(now) } },   // expired — take over
+        { 'lease.by': EXECUTOR_ID },                 // re-entrant for us
+      ],
+    },
+    { $set: { lease: { by: EXECUTOR_ID, until: new Date(now + LEASE_MS) } } },
+  );
+  return n === 1;
+}
+
 export function parseDuration(s) {
   if (typeof s === 'number') return s;
   const m = /^\s*(\d+(?:\.\d+)?)\s*(ms|s|sec|second|seconds|m|min|minute|minutes|h|hour|hours|d|day|days)\s*$/.exec(s);
@@ -223,7 +249,15 @@ async function execute(def, key) {
   const docId = runIdFor(def.name, key);
   if (executing.has(docId)) return; // one executor per run per process
   executing.add(docId);
+  let heartbeat = null;
   try {
+    if (!(await claimLease(docId))) return; // another live process owns this run
+    heartbeat = Meteor.setInterval(() => {
+      WorkflowRuns.updateAsync(
+        { _id: docId, 'lease.by': EXECUTOR_ID },
+        { $set: { 'lease.until': new Date(Date.now() + LEASE_MS) } },
+      ).catch(() => {});
+    }, Math.floor(LEASE_MS / 3));
     const doc = await WorkflowRuns.findOneAsync(docId);
     if (!doc || ['done', 'failed', 'rejected'].includes(doc.status)) return;
     const ctx = new WorkflowContext(def, key, doc);
@@ -246,7 +280,12 @@ async function execute(def, key) {
     // execute() is called fire-and-forget; never let it reject unhandled.
     console.error(`[durable:workflow] executor for ${docId} crashed:`, outer);
   } finally {
+    if (heartbeat) Meteor.clearInterval(heartbeat);
     executing.delete(docId);
+    await WorkflowRuns.updateAsync(
+      { _id: docId, 'lease.by': EXECUTOR_ID },
+      { $unset: { lease: 1 } },
+    ).catch(() => {});
   }
 }
 

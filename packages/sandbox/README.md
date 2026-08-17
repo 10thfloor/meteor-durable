@@ -90,10 +90,14 @@ the entity-style queue is correctness, not a limitation.
 - Isolation is exactly as strong as the provider's. The Docker provider is a
   dev-grade default, not a hostile-code boundary; use microVM providers for
   that.
-- Snapshot images accumulate (`docker images 'sbx-*'`) — prune them yourself;
-  there's no GC yet.
-- Exec timeouts kill the docker *client* call; a wedged process inside the
-  container survives until hibernation reaps it.
+- Snapshots are retained per box (`keepSnaps`, default 5); older ones are
+  provider-deleted unless another box (e.g. a fork seed) still materializes
+  from them.
+- Exec deadlines run under coreutils `timeout` inside the container (TERM,
+  then KILL), so the process itself dies — not just our CLI call.
+- Resource limits are ON by default (`cpus: 1`, `mem: '512m'`, `pids: 256`);
+  override via `limits`, and paths are charset-checked + passed argv-style
+  (no shell) for file operations.
 - Op queues are per-process; run one app instance per sandbox family.
 
 ## Family

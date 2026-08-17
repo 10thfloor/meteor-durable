@@ -6,12 +6,20 @@ import { Expenses, Payments, Budget } from '/imports/ledger-core';
 
 // ── Stubs standing in for the outside world ──────────────────────
 const Bank = {
-  async transfer(payee, amount) {
-    const id = await Payments.insertAsync({
-      payee, amount: amount.value, currency: amount.currency, at: new Date(),
-    });
-    console.log(`[bank] 💸 transferred $${amount.value} to ${payee}`);
-    return id;
+  // Idempotent when given an id (we pass the keyring op id): a crash-retry
+  // re-inserts the SAME _id and hits the duplicate key instead of paying twice.
+  async transfer(payee, amount, id) {
+    try {
+      await Payments.insertAsync({
+        ...(id ? { _id: id } : {}),
+        payee, amount: amount.value, currency: amount.currency, at: new Date(),
+      });
+      console.log(`[bank] 💸 transferred $${amount.value} to ${payee}`);
+    } catch (e) {
+      if (!(String(e).includes('E11000') || e?.code === 11000)) throw e;
+      console.log(`[bank] transfer ${id} already recorded — skipping duplicate`);
+    }
+    return id ?? null;
   },
 };
 const Email = {
@@ -61,9 +69,10 @@ export const Treasury = Meteor.keyring({
 export const pay = Treasury.method({
   name: 'pay',
   schema: { expenseId: String },
+  retry: true,   // safe: the transfer is idempotent on the op id below
   async run({ expenseId }) {
     const e = await Expenses.findOneAsync(expenseId);
-    const receipt = await Bank.transfer(e.payee, e.amount);
+    const receipt = await Bank.transfer(e.payee, e.amount, this.opId);
     // the money moved, so the expense is paid — regardless of which caller
     // (the Fulfill workflow or an agent) asked for the transfer
     await Expenses.updateAsync(expenseId, { $set: { status: 'paid' } });
@@ -111,6 +120,12 @@ export const recordVerdict = Meteor.method({
   name: 'expenses.recordVerdict',
   schema: { expenseId: String, verdict: String },
   async run({ expenseId, verdict }) {
+    // triage is for the agent identity or a finance signer — not any caller
+    if (!this.userId) throw new Meteor.Error('not-authorized', 'sign in to triage');
+    const role = (await Meteor.users.findOneAsync(this.userId))?.profile?.role;
+    if (!['agent', 'finance-signer'].includes(role)) {
+      throw new Meteor.Error('not-authorized', 'triage requires the agent or a finance signer');
+    }
     if (!['approve', 'deny'].includes(verdict)) {
       throw new Meteor.Error('bad-verdict', "verdict must be 'approve' or 'deny'");
     }
@@ -123,11 +138,15 @@ export const submitExpense = Meteor.method({
   name: 'expenses.submit',
   schema: { memo: String, amount: Number, dept: String, payee: String },
   async run({ memo, amount, dept, payee }) {
+    if (!this.userId) throw new Meteor.Error('not-authorized', 'sign in to submit');
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000) {
+      throw new Meteor.Error('bad-amount', 'amount must be a positive finite number (≤ 1,000,000)');
+    }
     return Expenses.insertAsync({
       memo, dept, payee,
-      amount: { value: amount, currency: 'USD' },   // v2 shape
+      amount: { value: Math.round(amount * 100) / 100, currency: 'USD' },
       status: 'submitted',
-      submittedBy: this.userId ?? null,
+      submittedBy: this.userId,
       submittedAt: new Date(),
     });
   },

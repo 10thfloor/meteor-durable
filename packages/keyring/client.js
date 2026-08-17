@@ -146,9 +146,10 @@ Meteor.keyring = function keyring(def) {
 
         // Capture everything reactive BEFORE going async, so the sign itself
         // touches no reactive sources and cannot silently miss a retry.
+        const parsed = JSON.parse(nonceJson);
         const job = {
           id: mine.id,
-          nonces: JSON.parse(nonceJson),
+          nonces: parsed.nonces ?? parsed, // new {nonces, commitments} blob, or a legacy bare-nonces one
           commitmentList: op.signingPackage.commitments,
           msg: msgBytes(op.signingPackage.msgHex),
           opId: op._id,
@@ -200,9 +201,27 @@ Meteor.keyring = function keyring(def) {
       if (!suite) throw new Error('This keyring has no crypto suite on the client');
       const uid = Meteor.userId();
       if (!uid) throw new Meteor.Error('keyring-auth', 'Sign in to approve');
-      const share = await myShare(name);
-      const { nonces, commitments } = suite.generateNoncePair(share.share);
-      localStorage.setItem(nonceKey(name, opId, uid), JSON.stringify(nonces));
+      const key = nonceKey(name, opId, uid);
+      // Idempotent retry: NEVER regenerate nonces for an op we already
+      // committed to — a second pair would desync from the published
+      // commitment and wedge the quorum. Reuse the stored pair instead.
+      const storedJson = localStorage.getItem(key);
+      let commitments;
+      if (storedJson) {
+        const stored = JSON.parse(storedJson);
+        if (!stored.commitments) {
+          throw new Meteor.Error('keyring-nonce',
+            'Stale nonce blob for this op (pre-idempotency format) — clear it before retrying');
+        }
+        commitments = stored.commitments;
+      } else {
+        const share = await myShare(name);
+        const pair = suite.generateNoncePair(share.share);
+        commitments = pair.commitments;
+        // persist BEFORE the network call: a crash between the two makes the
+        // retry reuse this exact pair rather than mint a fresh one
+        localStorage.setItem(key, JSON.stringify({ nonces: pair.nonces, commitments }));
+      }
       return Meteor.callAsync('durable.keyring.commit', name, opId, commitments);
     },
     method(mdef) {

@@ -591,29 +591,41 @@ async function sendSay(name, key, text, opts = {}) {
 }
 
 // ── client bridge ──────────────────────────────────────────────────────────
+// Authorization: def.allow({ userId, key, action }) gates every client-reachable
+// surface (methods AND publications). Default: any signed-in user. Actions:
+// 'say' | 'interrupt' | 'stop' | 'compact' | 'fork' | 'watch'.
+const defaultAllow = ({ userId }) => !!userId;
+async function requireAllow(name, userId, key, action) {
+  const entry = registry.get(name);
+  if (!entry) throw new Meteor.Error('agent-unknown', name);
+  const allow = entry.def.allow ?? defaultAllow;
+  if (!(await allow({ userId, key, action }))) {
+    throw new Meteor.Error('not-authorized', `agent '${name}': '${action}' not allowed`);
+  }
+  return entry;
+}
+
 Meteor.methods({
   async 'durable.agent.say'(name, key, text, opts) {
     check(name, String); check(key, String); check(text, String);
     check(opts, Match.Optional({ followUp: Match.Optional(Boolean) }));
+    await requireAllow(name, this.userId, key, 'say');
     return sendSay(name, key, text, opts || {});
   },
   async 'durable.agent.interrupt'(name, key, opts) {
     check(name, String); check(key, String);
     check(opts, Match.Optional({ hard: Match.Optional(Boolean) }));
-    const entry = registry.get(name);
-    if (!entry) throw new Meteor.Error('agent-unknown', name);
+    const entry = await requireAllow(name, this.userId, key, 'interrupt');
     return entry.handle(key).interrupt(opts || {});
   },
   async 'durable.agent.stop'(name, key) {
     check(name, String); check(key, String);
-    const entry = registry.get(name);
-    if (!entry) throw new Meteor.Error('agent-unknown', name);
+    const entry = await requireAllow(name, this.userId, key, 'stop');
     return entry.handle(key).stop();
   },
   async 'durable.agent.compact'(name, key) {
     check(name, String); check(key, String);
-    const entry = registry.get(name);
-    if (!entry) throw new Meteor.Error('agent-unknown', name);
+    const entry = await requireAllow(name, this.userId, key, 'compact');
     return entry.handle(key).compact();
   },
   async 'durable.agent.approve'(name, key, approved, reason) {
@@ -636,16 +648,23 @@ Meteor.methods({
       say: Match.Optional(String), key: Match.Optional(String),
     }));
     if (!this.userId) throw new Meteor.Error('not-authorized', 'sign in to fork');
+    await requireAllow(name, this.userId, key, 'fork');
     return forkAgent(name, key, opts || {});
   },
 });
 
-Meteor.publish('durable.agent.run', function publishRun(name, key) {
+Meteor.publish('durable.agent.run', async function publishRun(name, key) {
   check(name, String); check(key, String);
+  const entry = registry.get(name);
+  const allow = entry?.def.allow ?? defaultAllow;
+  if (!entry || !(await allow({ userId: this.userId, key, action: 'watch' }))) return this.ready();
   return WorkflowRuns.find(runIdFor(name, key)); // whole run doc incl. journal = the transcript
 });
-Meteor.publish('durable.agent.runs', function publishRuns(name) {
+Meteor.publish('durable.agent.runs', async function publishRuns(name) {
   check(name, String);
+  const entry = registry.get(name);
+  const allow = entry?.def.allow ?? defaultAllow;
+  if (!entry || !(await allow({ userId: this.userId, key: null, action: 'watch' }))) return this.ready();
   return WorkflowRuns.find({ workflow: `agent:${name}` }, {
     fields: {
       workflow: 1, key: 1, status: 1, currentStep: 1, waitingFor: 1,

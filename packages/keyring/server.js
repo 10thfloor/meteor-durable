@@ -295,7 +295,7 @@ class Keyring {
       const argsHash = SHA256(`${keyring.name}:${def.name}:${stableStringify(args)}`);
       const existing = await KeyringOps.findOneAsync({
         keyring: keyring.name, method: def.name, argsHash,
-        status: { $in: [...LIVE, 'executed'] },
+        status: { $in: [...LIVE, 'executed', 'interrupted'] },
       });
       let opId = existing?._id;
       if (!opId) {
@@ -303,13 +303,29 @@ class Keyring {
         const op = {
           _id: opId, keyring: keyring.name, method: def.name, args, argsHash,
           required: keyring.t, approvals: [], sigShares: [],
-          status: 'awaiting', createdAt: new Date(),
+          status: 'awaiting', active: true, createdAt: new Date(),
         };
         op.msgHex = msgHexFor(op);
-        await KeyringOps.insertAsync(op);
+        try {
+          await KeyringOps.insertAsync(op);
+        } catch (e) {
+          // unique partial index on active (keyring, method, argsHash): a
+          // concurrent caller won the race — join their op instead.
+          if (!(String(e).includes('E11000') || e?.code === 11000)) throw e;
+          const winner = await KeyringOps.findOneAsync({
+            keyring: keyring.name, method: def.name, argsHash, active: true,
+          });
+          if (!winner) throw e;
+          opId = winner._id;
+        }
       }
-      const doc = await waitForOp(opId, (d) => ['executed', 'failed'].includes(d.status));
+      const doc = await waitForOp(opId, (d) => ['executed', 'failed', 'interrupted'].includes(d.status));
       if (doc.status === 'failed') throw new Meteor.Error('keyring-failed', doc.error);
+      if (doc.status === 'interrupted') {
+        throw new Meteor.Error('keyring-interrupted',
+          `Operation ${opId} was interrupted mid-execution; the action may or may not have run. `
+          + `Resolve with keyring.resolveInterrupted(), or mark the method retry: true if it is idempotent.`);
+      }
       return doc.result;
     };
     callable.methodName = def.name;
@@ -412,6 +428,7 @@ class Keyring {
     if (!valid) {
       await KeyringOps.updateAsync(opId, {
         $set: { status: 'failed', error: 'Aggregated signature failed RFC 8032 verification' },
+        $unset: { active: 1 },
       });
       return;
     }
@@ -419,22 +436,39 @@ class Keyring {
 
     const def = this.methods.get(op.method);
     if (!def) {
-      await KeyringOps.updateAsync(opId, { $set: { status: 'failed', error: `No method '${op.method}' registered` } });
+      await KeyringOps.updateAsync(opId, {
+        $set: { status: 'failed', error: `No method '${op.method}' registered` }, $unset: { active: 1 },
+      });
       return;
     }
     try {
-      const result = await def.run(op.args);
+      // run() gets the op id as `this.opId` so protected actions can be made
+      // idempotent (e.g. use it as the _id of whatever record the action creates).
+      const result = await def.run.call({ opId, op }, op.args);
       await KeyringOps.updateAsync(opId, {
         $set: {
           status: 'executed', signature, verified: true,
           result: result === undefined ? null : result, executedAt: new Date(),
         },
+        $unset: { active: 1 },
       });
     } catch (err) {
       await KeyringOps.updateAsync(opId, {
-        $set: { status: 'failed', signature, error: String(err?.message || err) },
+        $set: { status: 'failed', signature, error: String(err?.message || err) }, $unset: { active: 1 },
       });
     }
+  }
+
+  /** Resolve an op parked as 'interrupted' (crash mid-execution). The caller
+   *  is asserting what actually happened: outcome 'executed' (with the real
+   *  result) or 'failed'. Server-side API — this is a human/ops decision. */
+  async resolveInterrupted(opId, { outcome, result = null, error = null }) {
+    if (!['executed', 'failed'].includes(outcome)) throw new Error("outcome must be 'executed' or 'failed'");
+    const n = await KeyringOps.updateAsync(
+      { _id: opId, keyring: this.name, status: 'interrupted' },
+      { $set: { status: outcome, result, error, resolvedAt: new Date() }, $unset: { active: 1 } },
+    );
+    if (n !== 1) throw new Meteor.Error('keyring-op', `No interrupted op '${opId}' to resolve`);
   }
 
   pending() {
@@ -551,14 +585,32 @@ Meteor.publish('durable.keyring.dkg', async function publishDkg(name) {
   return Keyrings.find(name);
 });
 
-// Crash recovery: interrupted executions re-run (at-least-once); signing ops
-// that already hold a full quorum of shares aggregate now.
+// Crash recovery. Default is AT-MOST-ONCE: an op that crashed mid-execution
+// parks as 'interrupted' (its action may or may not have run — a human calls
+// keyring.resolveInterrupted()). Methods declared `retry: true` assert their
+// action is idempotent and re-enter the signing path instead. Quorum-complete
+// signing ops aggregate now.
 Meteor.startup(async () => {
-  await KeyringOps.updateAsync(
-    { status: 'executing' },
-    { $set: { status: 'signing' }, $unset: { executingAt: 1 } },
-    { multi: true },
-  );
+  // Idempotency across processes: one ACTIVE op per (keyring, method, args).
+  await KeyringOps.rawCollection().createIndex(
+    { keyring: 1, method: 1, argsHash: 1 },
+    { unique: true, partialFilterExpression: { active: true }, name: 'keyring_active_op' },
+  ).catch((e) => console.error('[durable:keyring] active-op index:', e.message));
+
+  const stuck = await KeyringOps.find({ status: 'executing' }).fetchAsync();
+  for (const op of stuck) {
+    const def = registry.get(op.keyring)?.methods.get(op.method);
+    if (def?.retry) {
+      await KeyringOps.updateAsync(op._id, { $set: { status: 'signing' }, $unset: { executingAt: 1 } });
+      console.log(`[durable:keyring] op ${op._id} re-queued (method '${op.method}' is retry-safe)`);
+    } else {
+      await KeyringOps.updateAsync(op._id, {
+        $set: { status: 'interrupted', error: 'crashed mid-execution; resolve manually or mark the method retry: true' },
+        $unset: { executingAt: 1 },
+      });
+      console.warn(`[durable:keyring] op ${op._id} interrupted mid-execution — parked (at-most-once default)`);
+    }
+  }
   const signing = await KeyringOps.find({ status: 'signing' }).fetchAsync();
   for (const op of signing) {
     const keyring = registry.get(op.keyring);

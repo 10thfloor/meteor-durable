@@ -10,6 +10,11 @@ import '/server/sandbox-demo';
 const SIGNERS = ['alice', 'bob', 'carol', 'dave', 'eve'];
 
 Meteor.startup(async () => {
+  // DEMO SEEDING — development only. A production deploy gets no default
+  // accounts and no default agent token; provision real ones yourself.
+  if (Meteor.isProduction) {
+    console.warn('[seed] production mode: no demo users, no demo agent token');
+  } else {
   // Seed users: 5 finance signers, 1 employee, 1 agent.
   for (const username of [...SIGNERS, 'frank', 'agent']) {
     const existing = await Accounts.findUserByUsername(username);
@@ -36,6 +41,7 @@ Meteor.startup(async () => {
     console.log('[seed] agent MCP token generated + installed');
   }
   console.log(`[mcp] agent auth: Authorization: Bearer ${agentToken}`);
+  }
 
   // FROST: sanity-check both the signing suite and the DKG, then start the
   // (client-driven) DKG session for the configured threshold.
@@ -49,8 +55,14 @@ Meteor.startup(async () => {
   console.log(`[frost] treasury threshold: ${TREASURY_THRESHOLD} (keygen: DKG)`);
 });
 
-Meteor.publish('expenses.all', () => Expenses.find({}, { sort: { submittedAt: -1 } }));
-Meteor.publish('payments.all', () => Payments.find({}, { sort: { at: -1 } }));
+Meteor.publish('expenses.all', function () {
+  if (!this.userId) return this.ready();
+  return Expenses.find({}, { sort: { submittedAt: -1 } });
+});
+Meteor.publish('payments.all', function () {
+  if (!this.userId) return this.ready();
+  return Payments.find({}, { sort: { at: -1 } });
+});
 Meteor.publish('users.public', () =>
   Meteor.users.find({}, { fields: { username: 1, 'profile.role': 1 } }));
 
