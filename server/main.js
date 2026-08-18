@@ -66,3 +66,5 @@ Meteor.publish('payments.all', function () {
 Meteor.publish('users.public', () =>
   Meteor.users.find({}, { fields: { username: 1, 'profile.role': 1 } }));
 
+
+

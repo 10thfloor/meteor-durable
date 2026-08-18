@@ -206,6 +206,19 @@ export function selfTest(t = 3, n = 5) {
 // server relaying them learns nothing that a dealer would.
 const DKG_CTX = utf8('FROST-ED25519-SHA512-v1 dkg');
 
+// PoK challenge, bound to the CEREMONY: ctxHex is a per-session context
+// (hash of keyring name, threshold, roster, session nonce). Without it a
+// round-1 package replays verbatim into any other ceremony for the same
+// participant id — so this FAILS CLOSED: the context is mandatory and must be
+// exactly 32 bytes, which also makes every field fixed-width (ctx 32B,
+// id 32B, points 32B) and the concatenation unambiguous by construction.
+function dkgChallenge(ctxHex, id, A0bytes, Rbytes) {
+  if (typeof ctxHex !== 'string' || !/^[0-9a-f]{64}$/.test(ctxHex)) {
+    throw new Error('DKG challenge requires a 32-byte hex ceremony context');
+  }
+  return mod(bytesToNumberLE(sha512(concat(DKG_CTX, hexToBytes(ctxHex), scalarToBytes(BigInt(id)), A0bytes, Rbytes))));
+}
+
 // safe scalar multiply (noble throws on the 0 scalar)
 const pmul = (P, s) => (mod(s) === 0n ? Point.ZERO : P.multiply(mod(s)));
 
@@ -241,15 +254,17 @@ function evalCommitment(commitmentHex, x) {
 
 /** Round 1: sample a degree-(t-1) polynomial, commit to it (Feldman), prove
  *  knowledge of the constant term, and publish an ephemeral X25519 key for
- *  receiving encrypted shares. `secret` STAYS ON THE DEVICE. */
-export function dkgRound1(id, t) {
+ *  receiving encrypted shares. `secret` STAYS ON THE DEVICE.
+ *  `ctxHex` (REQUIRED, 32-byte hex) binds the proof to THIS ceremony —
+ *  dkgChallenge throws without it, so unbound proofs cannot be produced. */
+export function dkgRound1(id, t, ctxHex) {
   const coeffs = Array.from({ length: t }, randomScalar);   // coeffs[0] = a_i0
   const commitment = coeffs.map((c) => bytesToHex(Point.BASE.multiply(c).toRawBytes()));
   const a0 = coeffs[0];
   const k = randomScalar();
   const R = Point.BASE.multiply(k);
   const A0 = Point.BASE.multiply(a0);
-  const c = mod(bytesToNumberLE(sha512(concat(DKG_CTX, scalarToBytes(BigInt(id)), A0.toRawBytes(), R.toRawBytes()))));
+  const c = dkgChallenge(ctxHex, id, A0.toRawBytes(), R.toRawBytes());
   const mu = mod(k + a0 * c);
   const encPriv = x25519.utils.randomPrivateKey();
   return {
@@ -266,7 +281,7 @@ export function dkgRound1(id, t) {
  *  Every commitment point AND the proof nonce R must be a canonical,
  *  non-identity, prime-order point — otherwise the PoK is unsound (a low-order
  *  A0/R lets a prover pass without knowing any discrete log). */
-export function dkgVerifyProof(pub) {
+export function dkgVerifyProof(pub, ctxHex) {
   if (!Array.isArray(pub.commitment) || pub.commitment.length === 0) return false;
   let A0, R, commitmentPts;
   try {
@@ -274,7 +289,9 @@ export function dkgVerifyProof(pub) {
     A0 = commitmentPts[0];
     R = decodeValidPoint(pub.proof.R, 'proof.R');
   } catch (e) { return false; }
-  const c = mod(bytesToNumberLE(sha512(concat(DKG_CTX, scalarToBytes(BigInt(pub.id)), A0.toRawBytes(), R.toRawBytes()))));
+  let c;
+  try { c = dkgChallenge(ctxHex, pub.id, A0.toRawBytes(), R.toRawBytes()); }
+  catch (e) { return false; } // no/invalid ceremony context → fail closed
   return pmul(Point.BASE, bytesToNumberLE(hexToBytes(pub.proof.mu))).equals(R.add(pmul(A0, c)));
 }
 
@@ -292,9 +309,9 @@ export function dkgEncryptShare(mySecret, myId, recipient) {
  *  me, then derive my long-term signing share s_i (LOCAL), my public share
  *  Y_i = g^{s_i}, and the group public key. All parties arrive at the same
  *  group key without anyone learning the group secret. */
-export function dkgFinalize({ myId, mySecret, round1Publics, encryptedShares }) {
+export function dkgFinalize({ myId, mySecret, round1Publics, encryptedShares, ctxHex }) {
   for (const pub of round1Publics) {
-    if (!dkgVerifyProof(pub)) throw new Error(`DKG: proof-of-knowledge from participant ${pub.id} is invalid`);
+    if (!dkgVerifyProof(pub, ctxHex)) throw new Error(`DKG: proof-of-knowledge from participant ${pub.id} is invalid for this ceremony`);
   }
   const byId = Object.fromEntries(round1Publics.map((p) => [p.id, p]));
   const myCoeffs = mySecret.coeffs.map((h) => bytesToNumberLE(hexToBytes(h)));
@@ -340,8 +357,16 @@ export function dkgPublicShare(round1Publics, j) {
 //    DKG-derived group key, verified as a plain ed25519 signature ──
 export function dkgSelfTest(t = 3, n = 5) {
   const ids = Array.from({ length: n }, (_, i) => i + 1);
-  const parts = ids.map((id) => ({ id, ...dkgRound1(id, t) }));
+  const ctxHex = bytesToHex(randomBytes(32));           // this ceremony's context
+  const parts = ids.map((id) => ({ id, ...dkgRound1(id, t, ctxHex) }));
   const round1Publics = parts.map((p) => p.public);
+
+  // Binding must BITE: the same proof under any other ceremony context (or no
+  // context) has to fail — otherwise round-1 packages replay across ceremonies.
+  const otherCtx = bytesToHex(randomBytes(32));
+  if (dkgVerifyProof(round1Publics[0], otherCtx) || dkgVerifyProof(round1Publics[0])) {
+    return { ok: false, why: 'PoK verified under a foreign/absent ceremony context — binding is broken' };
+  }
 
   // round 2: every ordered pair, encrypted
   const encryptedShares = [];
@@ -353,7 +378,7 @@ export function dkgSelfTest(t = 3, n = 5) {
   }
   // finalize each participant
   const finals = parts.map((p) =>
-    ({ id: p.id, ...dkgFinalize({ myId: p.id, mySecret: p.secret, round1Publics, encryptedShares }) }));
+    ({ id: p.id, ...dkgFinalize({ myId: p.id, mySecret: p.secret, round1Publics, encryptedShares, ctxHex }) }));
 
   const pks = new Set(finals.map((f) => f.groupPublicKey));
   if (pks.size !== 1) return { ok: false, why: 'participants disagree on the group public key' };
@@ -375,5 +400,5 @@ export function dkgSelfTest(t = 3, n = 5) {
     zHex: signShare({ id: s.id, shareHex: s.signingShare, nonces: s.nonces, commitmentList, groupPublicKeyHex: groupPublicKey, msg }),
   }));
   const { valid } = aggregate({ commitmentList, sigShares, groupPublicKeyHex: groupPublicKey, msg });
-  return { ok: valid, why: valid ? `DKG ${t}-of-${n}: group key co-generated, no dealer; ${t}-of-${n} sig verifies as plain ed25519` : 'signature under DKG key failed verification' };
+  return { ok: valid, why: valid ? `DKG ${t}-of-${n}: group key co-generated, no dealer; PoKs ceremony-bound; ${t}-of-${n} sig verifies as plain ed25519` : 'signature under DKG key failed verification' };
 }

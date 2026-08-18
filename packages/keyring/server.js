@@ -77,6 +77,36 @@ class Keyring {
     this.custodians = def.custodians;
     this.suite = def.suite;
     this.methods = new Map();
+    // Key confirmation: the new key's first act is co-signing its own birth
+    // certificate — a normal t-of-n op over the ceremony transcript hash.
+    // The aggregated signature becomes the keyring's stored provenance.
+    const keyring = this;
+    this.methods.set('confirm', {
+      name: 'confirm', schema: { transcriptHash: String }, retry: true,
+      async run({ transcriptHash }) {
+        // Epoch guard: a (re-queued) confirm op may only stamp provenance if
+        // its transcript matches the keyring's CURRENT ceremony — a confirm
+        // from a superseded key must never certify its successor. Write-once
+        // per epoch (re-keys $unset provenance, reopening the slot).
+        const kr = await Keyrings.findOneAsync(keyring.name);
+        if (!kr || kr.status !== 'ready' || transcriptHash !== keyring._transcriptHash(kr)) {
+          throw new Meteor.Error('keyring-confirm-stale', 'confirm op does not match the current key epoch');
+        }
+        await Keyrings.updateAsync(
+          { _id: keyring.name, provenance: { $exists: false } },
+          {
+            $set: {
+              provenance: {
+                transcriptHash, signature: this.signature ?? null,
+                opId: this.opId, msgHex: this.op?.msgHex ?? null, confirmedAt: new Date(),
+              },
+            },
+          },
+        );
+        console.log(`[durable:keyring] '${keyring.name}' key CONFIRMED — transcript ${transcriptHash.slice(0, 12)}… co-signed`);
+        return { confirmed: true, transcriptHash };
+      },
+    });
     registry.set(def.name, this);
   }
 
@@ -119,7 +149,9 @@ class Keyring {
     const existing = await this.doc();
     if (existing && existing.t === this.t && existing.n === this.n) return existing;
     if (existing) {
-      const live = await KeyringOps.find({ keyring: this.name, status: { $in: LIVE } }).countAsync();
+      // A pending key CONFIRMATION must not block (or be stranded by) a
+      // re-key — it certifies the outgoing key, so it is superseded, not owed.
+      const live = await KeyringOps.find({ keyring: this.name, status: { $in: LIVE }, method: { $ne: 'confirm' } }).countAsync();
       if (live > 0) {
         console.warn(`[durable:keyring] '${this.name}' configured ${this.t}-of-${this.n} but ${live} live op(s) exist under ${existing.t}-of-${existing.n}; keeping old key until they settle`);
         return existing;
@@ -164,23 +196,36 @@ class Keyring {
       return existing;
     }
     if (existing && existing.keygen === 'dkg' && existing.status === 'ready') {
-      const live = await KeyringOps.find({ keyring: this.name, status: { $in: LIVE } }).countAsync();
+      // Confirm ops certify the OLD key — they never block a re-key.
+      const live = await KeyringOps.find({ keyring: this.name, status: { $in: LIVE }, method: { $ne: 'confirm' } }).countAsync();
       if (live > 0) {
         console.warn(`[durable:keyring] '${this.name}' reconfigured to ${this.t}-of-${this.n} but ${live} live op(s) exist under the old key; keeping it until they settle`);
         return existing;
       }
     }
+    // Supersede any live confirmation of the outgoing key: its epoch is over.
+    await KeyringOps.updateAsync(
+      { keyring: this.name, method: 'confirm', status: { $in: LIVE } },
+      { $set: { status: 'failed', error: 'superseded by re-key' }, $unset: { active: 1 } },
+      { multi: true },
+    );
     const chosen = await this.chosenCustodians();
     const sessionId = Random.id();
     const participants = chosen.map((u, i) => ({ userId: u._id, username: u.username, id: i + 1 }));
+    // Ceremony context Φ: binds every round-1 proof-of-knowledge to THIS
+    // session — keyring, threshold, exact roster, and a fresh nonce. A proof
+    // from any other ceremony (e.g. before a re-key) cannot be replayed here.
+    const ctx = SHA256(`dkg|${this.name}|${this.t}-of-${this.n}|`
+      + `${participants.map((p) => `${p.id}:${p.userId}:${p.username}`).join(',')}|${sessionId}`);
     await KeyringShares.removeAsync({ keyring: this.name }); // no escrow under DKG
     await Keyrings.upsertAsync({ _id: this.name }, {
       $set: {
         scheme: this.scheme, keygen: 'dkg', t: this.t, n: this.n,
         status: 'dkg', sessionId, participants, groupPublicKey: null,
-        dkg: { phase: 'round1', round1: [], round2: [], finalized: [] },
+        dkg: { phase: 'round1', ctx, round1: [], round2: [], finalized: [] },
         createdAt: new Date(),
       },
+      $unset: { provenance: 1 },
     });
     console.log(`[durable:keyring] DKG session ${sessionId.slice(0, 8)} for '${this.name}' ${this.t}-of-${this.n}; awaiting round-1 from: ${participants.map((p) => p.username).join(', ')}`);
     return this.doc();
@@ -199,8 +244,13 @@ class Keyring {
    *  When all n arrive, derive the group key and public shares from the public
    *  commitments and open round 2. */
   async dkgRound1(userId, pub) {
-    const { participant } = await this._requireParticipant(userId, 'round1');
+    const { doc, participant } = await this._requireParticipant(userId, 'round1');
     if (pub.id !== participant.id) throw new Meteor.Error('keyring-dkg', 'participant id mismatch');
+    // Fail closed on unbound sessions: a doc without a ceremony context (e.g.
+    // created by pre-binding code) must be restarted, never quietly accepted.
+    if (!doc.dkg.ctx) {
+      throw new Meteor.Error('keyring-dkg', 'this DKG session has no ceremony context — restart the ceremony');
+    }
     // Bind the polynomial degree: a longer/shorter commitment would pass every
     // downstream check yet produce a group key no t-subset can sign under.
     if (!Array.isArray(pub.commitment) || pub.commitment.length !== this.t) {
@@ -210,8 +260,11 @@ class Keyring {
     if (!this.suite.isValidX25519(pub.encPub)) {
       throw new Meteor.Error('keyring-dkg', 'invalid encryption public key');
     }
-    // Verifies the PoK and that every commitment point is prime-order/non-identity.
-    if (!this.suite.dkgVerifyProof(pub)) throw new Meteor.Error('keyring-dkg', 'proof-of-knowledge failed verification');
+    // Verifies the PoK — bound to THIS ceremony's context — and that every
+    // commitment point is prime-order/non-identity.
+    if (!this.suite.dkgVerifyProof(pub, doc.dkg.ctx)) {
+      throw new Meteor.Error('keyring-dkg', 'proof-of-knowledge failed verification for this ceremony');
+    }
 
     await Keyrings.updateAsync(
       { _id: this.name, 'dkg.phase': 'round1', 'dkg.round1.id': { $ne: participant.id } },
@@ -259,6 +312,36 @@ class Keyring {
     return after.dkg.round2.length;
   }
 
+  /** Canonical hash of a ceremony's full public transcript. Binds the keyring
+   *  NAME and SESSION ID directly (not just transitively via ctx), the exact
+   *  roster + derived public shares, every round-1 package, who finalized, and
+   *  the resulting group key — so a verifier can recompute it from public data
+   *  alone and cross-check the server's ctx. */
+  _transcriptHash(doc) {
+    return SHA256(stableStringify({
+      keyring: this.name,
+      sessionId: doc.sessionId ?? null,
+      ctx: doc.dkg?.ctx ?? null,
+      t: doc.t, n: doc.n,
+      participants: (doc.participants ?? []).map(({ userId, username, id, publicShare }) => ({ userId, username, id, publicShare })),
+      round1: (doc.dkg?.round1 ?? []).map(({ id, commitment, proof, encPub }) => ({ id, commitment, proof, encPub })),
+      finalized: (doc.dkg?.finalized ?? []).map((f) => f.id).sort((a, b) => a - b),
+      groupPublicKey: doc.groupPublicKey,
+    }));
+  }
+
+  /** The ceremony's birth certificate: hash the full public transcript and
+   *  open a normal t-of-n 'confirm' op over it. The resulting aggregated
+   *  signature — verifiable as plain ed25519 under the brand-new group key —
+   *  becomes the keyring's stored provenance. */
+  async _openKeyConfirmation() {
+    const doc = await this.doc();
+    if (!doc?.groupPublicKey || doc.status !== 'ready' || !doc.dkg) return;
+    const transcriptHash = this._transcriptHash(doc);
+    const opId = await this._createOp('confirm', { transcriptHash });
+    console.log(`[durable:keyring] '${this.name}' confirmation op ${opId} open — co-sign the birth certificate (transcript ${transcriptHash.slice(0, 12)}…)`);
+  }
+
   /** Finalize: a participant confirms the group key and their public share it
    *  derived locally. The server re-derives both from public round-1 data and
    *  rejects a mismatch. When all n confirm and agree, the keyring is ready. */
@@ -276,49 +359,57 @@ class Keyring {
     const after = await this.doc();
     if (after.dkg.finalized.length === this.n && after.status === 'dkg'
         && after.dkg.finalized.every((f) => f.groupPublicKey === expectPk)) {
-      await Keyrings.updateAsync(
+      const flipped = await Keyrings.updateAsync(
         { _id: this.name, status: 'dkg' },
         { $set: { status: 'ready', 'dkg.phase': 'done', groupPublicKey: expectPk } },
       );
       console.log(`[durable:keyring] ✅ DKG '${this.name}' COMPLETE — ready; group pk ${expectPk.slice(0, 16)}… (no dealer, group secret never assembled)`);
+      if (flipped === 1) await this._openKeyConfirmation();
     }
     return after.dkg.finalized.length;
   }
 
+  /** Create (or join) the pending op for (method, args) — idempotent by
+   *  argsHash while live/settled. Shared by public callables and internal ops
+   *  like key confirmation. Returns the op id without waiting. */
+  async _createOp(methodName, args) {
+    const argsHash = SHA256(`${this.name}:${methodName}:${stableStringify(args)}`);
+    const existing = await KeyringOps.findOneAsync({
+      keyring: this.name, method: methodName, argsHash,
+      status: { $in: [...LIVE, 'executed', 'interrupted'] },
+    });
+    if (existing) return existing._id;
+    let opId = Random.id();
+    const op = {
+      _id: opId, keyring: this.name, method: methodName, args, argsHash,
+      required: this.t, approvals: [], sigShares: [],
+      status: 'awaiting', active: true, createdAt: new Date(),
+    };
+    op.msgHex = msgHexFor(op);
+    try {
+      await KeyringOps.insertAsync(op);
+    } catch (e) {
+      // unique partial index on active (keyring, method, argsHash): a
+      // concurrent caller won the race — join their op instead.
+      if (!(String(e).includes('E11000') || e?.code === 11000)) throw e;
+      const winner = await KeyringOps.findOneAsync({
+        keyring: this.name, method: methodName, argsHash, active: true,
+      });
+      if (!winner) throw e;
+      opId = winner._id;
+    }
+    return opId;
+  }
+
   method(def) {
     if (!def.name) throw new Error('keyring.method requires a name');
+    if (def.name === 'confirm') throw new Error("keyring.method: 'confirm' is reserved for key confirmation");
     this.methods.set(def.name, def);
     const keyring = this;
 
     const callable = async (args = {}) => {
       await keyring.ensureReady();
-      const argsHash = SHA256(`${keyring.name}:${def.name}:${stableStringify(args)}`);
-      const existing = await KeyringOps.findOneAsync({
-        keyring: keyring.name, method: def.name, argsHash,
-        status: { $in: [...LIVE, 'executed', 'interrupted'] },
-      });
-      let opId = existing?._id;
-      if (!opId) {
-        opId = Random.id();
-        const op = {
-          _id: opId, keyring: keyring.name, method: def.name, args, argsHash,
-          required: keyring.t, approvals: [], sigShares: [],
-          status: 'awaiting', active: true, createdAt: new Date(),
-        };
-        op.msgHex = msgHexFor(op);
-        try {
-          await KeyringOps.insertAsync(op);
-        } catch (e) {
-          // unique partial index on active (keyring, method, argsHash): a
-          // concurrent caller won the race — join their op instead.
-          if (!(String(e).includes('E11000') || e?.code === 11000)) throw e;
-          const winner = await KeyringOps.findOneAsync({
-            keyring: keyring.name, method: def.name, argsHash, active: true,
-          });
-          if (!winner) throw e;
-          opId = winner._id;
-        }
-      }
+      const opId = await keyring._createOp(def.name, args);
       const doc = await waitForOp(opId, (d) => ['executed', 'failed', 'interrupted'].includes(d.status));
       if (doc.status === 'failed') throw new Meteor.Error('keyring-failed', doc.error);
       if (doc.status === 'interrupted') {
@@ -443,8 +534,10 @@ class Keyring {
     }
     try {
       // run() gets the op id as `this.opId` so protected actions can be made
-      // idempotent (e.g. use it as the _id of whatever record the action creates).
-      const result = await def.run.call({ opId, op }, op.args);
+      // idempotent (e.g. use it as the _id of whatever record the action
+      // creates) — and `this.signature`, the aggregated ed25519 signature over
+      // the op message, for actions that persist their own authorization.
+      const result = await def.run.call({ opId, op, signature }, op.args);
       await KeyringOps.updateAsync(opId, {
         $set: {
           status: 'executed', signature, verified: true,
@@ -573,7 +666,7 @@ Meteor.publish('durable.keyring.pending', async function publishPending(name) {
 
 Meteor.publish('durable.keyring.info', function publishInfo(name) {
   check(name, String);
-  return Keyrings.find(name, { fields: { t: 1, n: 1, groupPublicKey: 1, scheme: 1, keygen: 1, status: 1, 'dkg.phase': 1, 'participants.username': 1, 'participants.id': 1, 'participants.userId': 1 } });
+  return Keyrings.find(name, { fields: { t: 1, n: 1, groupPublicKey: 1, scheme: 1, keygen: 1, status: 1, provenance: 1, 'dkg.phase': 1, 'participants.username': 1, 'participants.id': 1, 'participants.userId': 1 } });
 });
 
 // Full DKG session (all public/ciphertext) for the custodians' ceremony
@@ -626,9 +719,10 @@ Meteor.startup(async () => {
     if (!keyring || doc.dkg.finalized.length < doc.n) continue;
     const pk = keyring.suite.dkgGroupPublicKey(doc.dkg.round1);
     if (doc.dkg.finalized.every((f) => f.groupPublicKey === pk)) {
-      await Keyrings.updateAsync({ _id: doc._id, status: 'dkg' },
+      const flipped = await Keyrings.updateAsync({ _id: doc._id, status: 'dkg' },
         { $set: { status: 'ready', 'dkg.phase': 'done', groupPublicKey: pk } });
       console.log(`[durable:keyring] DKG '${doc._id}' finalized on restart — ready`);
+      if (flipped === 1) await keyring._openKeyConfirmation();
     }
   }
 });

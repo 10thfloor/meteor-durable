@@ -157,6 +157,9 @@ Template.approvalInbox.helpers({
   },
   shareCount: (op) => (op.sigShares || []).length,
   opMemo(op) {
+    if (op.method === 'confirm') {
+      return `key birth certificate · transcript ${op.args?.transcriptHash?.slice(0, 12)}…`;
+    }
     const e = Expenses.findOne(op.args?.expenseId);
     return e ? `$${e.amount.value} · ${e.memo}` : JSON.stringify(op.args);
   },

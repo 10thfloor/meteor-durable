@@ -72,7 +72,8 @@ Meteor.keyring = function keyring(def) {
         inFlight.add(gate);
         Tracker.nonreactive(() => (async () => {
           try {
-            const { secret, public: pub } = suite.dkgRound1(me.id, t);
+            // ctx binds this proof to THIS ceremony (session, roster, t-of-n)
+            const { secret, public: pub } = suite.dkgRound1(me.id, t, kdoc.dkg.ctx);
             localStorage.setItem(secretKey, JSON.stringify(secret));
             await Meteor.callAsync('durable.keyring.dkg.round1', name, pub);
           } catch (err) { console.error('[durable:keyring] DKG round1:', err); }
@@ -108,7 +109,7 @@ Meteor.keyring = function keyring(def) {
         Tracker.nonreactive(() => (async () => {
           try {
             const secret = JSON.parse(secretJson);
-            const fin = suite.dkgFinalize({ myId: me.id, mySecret: secret, round1Publics, encryptedShares });
+            const fin = suite.dkgFinalize({ myId: me.id, mySecret: secret, round1Publics, encryptedShares, ctxHex: kdoc.dkg.ctx });
             // The signing share s_i now lives ONLY here.
             localStorage.setItem(shareKey(name, uid), JSON.stringify({ id: me.id, share: fin.signingShare }));
             await Meteor.callAsync('durable.keyring.dkg.finalize', name,

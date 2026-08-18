@@ -105,6 +105,37 @@ commitment degree is bound to `t`, proof and commitment points must be
 prime-order/non-identity, X25519 keys are validated, and round-2 payload sizes
 are bounded. See the changelog in the source comments for detail.
 
+### Key binding
+
+Three bindings tie every signature and every key to its origin (the first two
+are RFC 9591; the rest were added after a second, binding-focused audit):
+
+- **Signature ↔ session**: FROST binding factors tie each signature share to
+  the message *and* the full commitment list (anti-ROS).
+- **Signature ↔ purpose**: the signed message is always
+  `keyring|method|argsHash|opId` — a signature cannot be replayed as any other
+  operation.
+- **Proof ↔ ceremony**: every DKG round-1 proof-of-knowledge commits to a
+  per-session context `Φ = H(keyring | t-of-n | roster | session nonce)`.
+  This **fails closed** — the suite refuses to produce or verify unbound
+  proofs, so a round-1 package cannot replay into a different ceremony
+  (including re-keys of the same keyring).
+- **Key ↔ transcript**: when a DKG completes, the new key's *first act* is
+  co-signing its own birth certificate — an ordinary t-of-n `confirm` op over
+  the canonical transcript hash (keyring, sessionId, Φ, roster + public
+  shares, every round-1 package, the finalize set, and the group key). The
+  aggregated signature is stored as `provenance` on the keyring doc, with the
+  exact signed message (`provenance.msgHex`) so anyone can verify it as plain
+  ed25519 from public data alone. Provenance is epoch-guarded and write-once:
+  a stale confirm op from a superseded key can neither certify nor block its
+  successor.
+
+**Accepted limitation** (deliberate, documented): participants read `Φ` and the
+roster from the server-relayed session doc rather than attesting them with
+device keys — under this trust model the server already controls roster
+presentation. Cryptographically binding the roster to custodian devices
+(WebAuthn-signed round-1 packages) is the next rung, not claimed here.
+
 ## Status & limitations
 
 This is a proof-of-concept, not audited for production use.
